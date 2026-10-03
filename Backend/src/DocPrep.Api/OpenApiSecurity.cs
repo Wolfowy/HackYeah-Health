@@ -26,6 +26,10 @@ public sealed class SecurityRequirementsOperationFilter : IOperationFilter
         {
             operation.Security = [Requirement("PatientSession"), Requirement("AnonymousInterviewJwt")];
         }
+        else if (policies.Contains(AuthenticationSchemes.PatientAccountPolicy))
+        {
+            operation.Security = [Requirement("PatientAccountJwt")];
+        }
         else if (policies.Contains(AuthenticationSchemes.FacilityPolicy))
         {
             operation.Security = [Requirement("StaffJwt"), Requirement("FacilityApiKey")];

@@ -59,8 +59,8 @@ Authorization: Bearer {{patientSession}}
 
 ### 5. Zapisany wynik webhooka — HTTP 200
 # Sukces: status "completed", niepusty finalReport i structuredDataJson.
-# structuredDataJson jest tekstem zawierającym JSON dostawcy; "{}" oznacza
-# brak wyodrębnionych pól, a nie automatycznie błąd zapisu.
+# structuredData jest zwalidowanym modelem DocPrep. Sprawdź też extractionStatus,
+# importStatus, schemaVersion i issues; structuredDataJson pozostaje przejściowo dla kompatybilności.
 # "processing": analiza/webhook jeszcze trwa; powtórz to żądanie.
 GET {{host}}/api/interviews/{{interviewId}}/result
 Authorization: Bearer {{patientSession}}
@@ -72,9 +72,8 @@ GET {{host}}/api/v1/integration/visits/{{visitId}}/status
 Authorization: Bearer {{adminAccessToken}}
 
 ### 7. Opcjonalnie: wersja robocza raportu DocPrep — HTTP 200
-# Webhook ElevenLabs nie uzupełnia jeszcze tego modelu automatycznie.
-# Pusty draft / latestVersion null / consentActive false nie oznacza,
-# że rozmowa nie została zapisana. Jej wynik sprawdza żądanie 5.
+# Poprawna lub częściowa ekstrakcja automatycznie uzupełnia ten draft.
+# Zgoda i ReportVersion nadal wymagają jawnego zatwierdzenia pacjenta.
 GET {{host}}/api/v1/interview
 Authorization: Bearer {{patientSession}}
 

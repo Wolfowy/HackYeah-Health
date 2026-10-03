@@ -11,6 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 using DocPrep.Application.Abstractions;
 using DocPrep.Application.Common;
 using DocPrep.Domain.Tenancy;
+using DocPrep.Application.Contracts;
 using DocPrep.Infrastructure.Persistence;
 
 namespace DocPrep.Api;
@@ -20,11 +21,13 @@ public static class AuthenticationSchemes
     public const string StaffJwt = "StaffJwt";
     public const string FacilityApiKey = "FacilityApiKey";
     public const string PatientSession = "PatientSession";
+    public const string PatientAccountJwt = "PatientAccountJwt";
     public const string AnonymousInterviewJwt = "AnonymousInterviewJwt";
     public const string InterviewAccess = "InterviewAccess";
     public const string FacilityPolicy = "FacilityAccess";
     public const string PatientPolicy = "PatientAccess";
     public const string StaffPolicy = "StaffAccess";
+    public const string PatientAccountPolicy = "PatientAccountAccess";
     public const string InterviewPolicy = "InterviewExecute";
 }
 
@@ -36,6 +39,7 @@ public static class DocPrepClaims
     public const string InterviewId = "interview_id";
     public const string InvitationId = "invitation_id";
     public const string Scope = "scope";
+    public const string PatientIdentityId = "patient_identity_id";
 }
 
 public sealed class JwtOptions
@@ -44,6 +48,7 @@ public sealed class JwtOptions
     public string Issuer { get; init; } = "DocPrep";
     public string Audience { get; init; } = "DocPrep.Frontend";
     public string AnonymousAudience { get; init; } = "DocPrep.AnonymousInterview";
+    public string PatientAudience { get; init; } = "DocPrep.PatientAccount";
     public string SigningKey { get; init; } = "";
     public int AccessTokenMinutes { get; init; } = 15;
     public int RefreshTokenDays { get; init; } = 7;
@@ -64,18 +69,146 @@ public sealed class JwtOptions
     }
 }
 
+public sealed record PatientRegisterRequest(string Email, string Password, string DisplayName);
+public sealed record PatientLoginRequest(string Email, string Password);
+public sealed record PatientProfileUpdateRequest(string DisplayName, string? AvatarUrl);
+public sealed record PatientAccountView(Guid Id, string Email, string DisplayName, string? AvatarUrl);
+public sealed record PatientAccountTokenResponse(string AccessToken, string RefreshToken, DateTimeOffset AccessTokenExpiresAt, PatientAccountView User);
+public sealed record PatientAccountVisitView(VisitDetails Visit);
+
+public sealed class PatientAccountService(DocPrepDbContext db, IPasswordHasher<PatientAccount> hasher,
+    IPatientSessionStore sessions, IClock clock, IOptions<JwtOptions> options)
+{
+    private readonly JwtOptions jwt = options.Value;
+
+    public async Task<PatientAccountTokenResponse> Register(Guid verifiedVisitId, PatientRegisterRequest request, CancellationToken ct)
+    {
+        ValidatePassword(request.Password);
+        var visit = await db.Visits.SingleOrDefaultAsync(x => x.Id == verifiedVisitId, ct) ?? throw new NotFoundError();
+        var email = PatientAccount.NormalizeEmail(request.Email);
+        if (await db.PatientAccounts.AnyAsync(x => x.Email == email || x.PatientIdentityId == visit.PatientIdentityId, ct))
+            throw new ConflictError("patient_account.exists", "An account already exists for this patient or e-mail address.");
+        var account = new PatientAccount(visit.PatientIdentityId, request.Email, request.DisplayName, "temporary", clock.UtcNow);
+        account.ReplacePasswordHash(hasher.HashPassword(account, request.Password));
+        db.PatientAccounts.Add(account);
+        var response = Issue(account);
+        await db.SaveChangesAsync(ct);
+        return response;
+    }
+
+    public async Task<PatientAccountTokenResponse> Login(PatientLoginRequest request, CancellationToken ct)
+    {
+        var email = PatientAccount.NormalizeEmail(request.Email);
+        var account = await db.PatientAccounts.SingleOrDefaultAsync(x => x.Email == email && x.IsActive, ct);
+        if (account is null || hasher.VerifyHashedPassword(account, account.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
+            throw new UnauthorizedError("patient_account.invalid_credentials", "Invalid credentials.");
+        return await SaveIssued(account, ct);
+    }
+
+    public async Task<PatientAccountTokenResponse> Refresh(RefreshTokenRequest request, CancellationToken ct)
+    {
+        var hash = Hash(request.RefreshToken);
+        var stored = await db.PatientRefreshTokens.SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
+        if (stored is null || !stored.IsUsable(clock.UtcNow)) throw new UnauthorizedError("patient_account.invalid_token", "Invalid refresh token.");
+        var account = await db.PatientAccounts.SingleOrDefaultAsync(x => x.Id == stored.AccountId && x.IsActive, ct)
+            ?? throw new UnauthorizedError("patient_account.invalid_token", "Invalid refresh token.");
+        var raw = GenerateRefreshToken(); stored.Revoke(clock.UtcNow, Hash(raw));
+        var access = CreateAccessToken(account);
+        db.PatientRefreshTokens.Add(new(account.Id, Hash(raw), clock.UtcNow.AddDays(jwt.RefreshTokenDays), clock.UtcNow));
+        await db.SaveChangesAsync(ct);
+        return new(access.Token, raw, access.ExpiresAt, Map(account));
+    }
+
+    public async Task Logout(Guid accountId, LogoutRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.RefreshToken)) return;
+        var token = await db.PatientRefreshTokens.SingleOrDefaultAsync(x => x.AccountId == accountId && x.TokenHash == Hash(request.RefreshToken), ct);
+        if (token is null) return; token.Revoke(clock.UtcNow); await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<PatientAccountView> Me(Guid accountId, CancellationToken ct) => Map(await Account(accountId, ct));
+    public async Task<PatientAccountView> Update(Guid accountId, PatientProfileUpdateRequest request, CancellationToken ct)
+    { var account = await Account(accountId, ct); account.Update(request.DisplayName, request.AvatarUrl); await db.SaveChangesAsync(ct); return Map(account); }
+
+    public async Task<IReadOnlyList<PatientAccountVisitView>> Visits(Guid accountId, CancellationToken ct)
+    {
+        var account = await Account(accountId, ct);
+        var visits = await db.Visits.Where(x => x.PatientIdentityId == account.PatientIdentityId).OrderByDescending(x => x.ScheduledAt).ToListAsync(ct);
+        var result = new List<PatientAccountVisitView>();
+        foreach (var visit in visits)
+        {
+            var interview = await db.AgentInterviews.Where(x => x.VisitProcessId == visit.Id).OrderByDescending(x => x.Generation).FirstOrDefaultAsync(ct);
+            if (interview is null) continue;
+            result.Add(new(new(visit.Id, visit.ExternalVisitId, visit.ScheduledAt, visit.TimeZone, visit.ServiceExpiresAt,
+                new(visit.AssignedClinicianId, visit.DoctorName, visit.DoctorSpecialty),
+                new(visit.FacilityId, visit.FacilityName, visit.FacilityAddress), visit.Room, visit.VisitType,
+                visit.LocationInstructions, VisitStatusName(visit.Status), interview.Id,
+                interview.Status == Domain.Interviews.AgentInterviewStatus.InProgress ? "in_progress" : interview.Status.ToString().ToLowerInvariant())));
+        }
+        return result;
+    }
+
+    public async Task<ExchangeAccessResult> CreateVisitSession(Guid accountId, Guid visitId, CancellationToken ct)
+    {
+        var account = await Account(accountId, ct);
+        var visit = await db.Visits.SingleOrDefaultAsync(x => x.Id == visitId && x.PatientIdentityId == account.PatientIdentityId, ct) ?? throw new NotFoundError();
+        visit.Expire(clock.UtcNow);
+        if (visit.Status is Domain.Visits.VisitStatus.Cancelled or Domain.Visits.VisitStatus.Expired) throw new ConflictError("visit.inactive", "The visit is inactive.");
+        var token = await sessions.Create(visit.Id, visit.ServiceExpiresAt, ct);
+        return new(token, visit.Id, visit.ServiceExpiresAt);
+    }
+
+    private async Task<PatientAccountTokenResponse> SaveIssued(PatientAccount account, CancellationToken ct)
+    { var response = Issue(account); await db.SaveChangesAsync(ct); return response; }
+    private PatientAccountTokenResponse Issue(PatientAccount account)
+    {
+        var access = CreateAccessToken(account); var refresh = GenerateRefreshToken();
+        db.PatientRefreshTokens.Add(new(account.Id, Hash(refresh), clock.UtcNow.AddDays(jwt.RefreshTokenDays), clock.UtcNow));
+        return new(access.Token, refresh, access.ExpiresAt, Map(account));
+    }
+    private (string Token, DateTimeOffset ExpiresAt) CreateAccessToken(PatientAccount account)
+    {
+        var now = clock.UtcNow; var expires = now.AddMinutes(jwt.AccessTokenMinutes);
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(new Claim[] { new(JwtRegisteredClaimNames.Sub, account.Id.ToString()),
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()), new(JwtRegisteredClaimNames.Email, account.Email),
+                new("name", account.DisplayName), new(DocPrepClaims.PatientIdentityId, account.PatientIdentityId.ToString()),
+                new(DocPrepClaims.Scope, "patient:account") }),
+            Issuer = jwt.Issuer, Audience = jwt.PatientAudience, IssuedAt = now.UtcDateTime, NotBefore = now.UtcDateTime,
+            Expires = expires.UtcDateTime, SigningCredentials = new(new SymmetricSecurityKey(jwt.GetSigningKey()), SecurityAlgorithms.HmacSha256)
+        };
+        var handler = new JwtSecurityTokenHandler(); return (handler.WriteToken(handler.CreateToken(descriptor)), expires);
+    }
+    private async Task<PatientAccount> Account(Guid id, CancellationToken ct) =>
+        await db.PatientAccounts.SingleOrDefaultAsync(x => x.Id == id && x.IsActive, ct) ?? throw new NotFoundError();
+    private static void ValidatePassword(string value)
+    { if (string.IsNullOrWhiteSpace(value) || value.Length < 12 || !value.Any(char.IsUpper) || !value.Any(char.IsLower) || !value.Any(char.IsDigit)) throw new ArgumentException("Password must contain at least 12 characters, upper/lower case letters and a digit."); }
+    private static string GenerateRefreshToken() => Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(64));
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    private static PatientAccountView Map(PatientAccount account) => new(account.Id, account.Email.ToLowerInvariant(), account.DisplayName, account.AvatarUrl);
+    private static string VisitStatusName(Domain.Visits.VisitStatus status) => status switch
+    {
+        Domain.Visits.VisitStatus.NotStarted => "not_started", Domain.Visits.VisitStatus.InProgress => "in_progress",
+        Domain.Visits.VisitStatus.AwaitingApproval => "awaiting_approval", Domain.Visits.VisitStatus.RequiresSupplementation => "requires_supplementation",
+        _ => status.ToString().ToLowerInvariant()
+    };
+}
+
 public sealed record LoginRequest(string Email, string Password);
 public sealed record RefreshTokenRequest(string RefreshToken);
 public sealed record LogoutRequest(string RefreshToken);
 public sealed record AuthenticatedUserView(Guid Id, Guid FacilityId, string Email, string DisplayName, FacilityRole Role, string? ClinicianId);
 public sealed record TokenResponse(string AccessToken, string RefreshToken, DateTimeOffset AccessTokenExpiresAt, AuthenticatedUserView User);
+public sealed record CreateStaffRequest(string Email, string DisplayName, FacilityRole Role, string? ClinicianId, string Password);
+public sealed record UpdateStaffRequest(string DisplayName, FacilityRole Role, string? ClinicianId, bool IsActive = true);
 public sealed record AnonymousInterviewTokenResponse(string AccessToken, int ExpiresIn, Guid InterviewId);
 
 public sealed class AnonymousInterviewTokenService(IOptions<JwtOptions> options, IClock clock)
 {
     private readonly JwtOptions jwt = options.Value;
 
-    public AnonymousInterviewTokenResponse Issue(Guid interviewId, Guid invitationId, DateTimeOffset invitationExpiresAt)
+    public AnonymousInterviewTokenResponse Issue(Guid interviewId, Guid invitationId, Guid visitId, DateTimeOffset invitationExpiresAt)
     {
         var now = clock.UtcNow;
         var expiresAt = new[] { now.AddMinutes(jwt.AnonymousTokenMinutes), invitationExpiresAt }.Min();
@@ -87,7 +220,8 @@ public sealed class AnonymousInterviewTokenService(IOptions<JwtOptions> options,
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim(DocPrepClaims.InterviewId, interviewId.ToString()),
                 new Claim(DocPrepClaims.InvitationId, invitationId.ToString()),
-                new Claim(DocPrepClaims.Scope, "interview:read interview:execute")]),
+                new Claim(DocPrepClaims.VisitId, visitId.ToString()),
+                new Claim(DocPrepClaims.Scope, "interview:read interview:execute report:review")]),
             Issuer = jwt.Issuer,
             Audience = jwt.AnonymousAudience,
             IssuedAt = now.UtcDateTime,
@@ -207,6 +341,29 @@ public sealed class StaffAuthenticationService(
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static UnauthorizedError InvalidCredentials() => new("authentication.invalid_credentials", "Invalid credentials.");
     private static AuthenticatedUserView Map(StaffUser user) => new(user.Id, user.FacilityId, user.Email.ToLowerInvariant(), user.DisplayName, user.Role, user.ClinicianId);
+}
+
+public sealed class StaffAdministrationService(DocPrepDbContext db, IPasswordHasher<StaffUser> hasher, IClock clock)
+{
+    public async Task<IReadOnlyList<AuthenticatedUserView>> List(Guid facilityId, CancellationToken ct) =>
+        await db.StaffUsers.AsNoTracking().Where(x => x.FacilityId == facilityId).OrderBy(x => x.DisplayName)
+            .Select(x => new AuthenticatedUserView(x.Id, x.FacilityId, x.Email.ToLower(), x.DisplayName, x.Role, x.ClinicianId)).ToListAsync(ct);
+    public async Task<AuthenticatedUserView> Create(Guid facilityId, CreateStaffRequest request, CancellationToken ct)
+    {
+        if (request.Password.Length < 12) throw new ArgumentException("Password must have at least 12 characters.");
+        var email = StaffUser.NormalizeEmail(request.Email);
+        if (await db.StaffUsers.AnyAsync(x => x.Email == email, ct)) throw new ConflictError("staff.email_exists", "The e-mail address is already used.");
+        if (request.Role == FacilityRole.Clinician && string.IsNullOrWhiteSpace(request.ClinicianId)) throw new ArgumentException("ClinicianId is required for a clinician.");
+        var user = new StaffUser(facilityId, request.Email, request.DisplayName, request.Role, request.ClinicianId, "temporary", clock.UtcNow);
+        user.ReplacePasswordHash(hasher.HashPassword(user, request.Password)); db.StaffUsers.Add(user); await db.SaveChangesAsync(ct);
+        return new(user.Id, user.FacilityId, user.Email.ToLowerInvariant(), user.DisplayName, user.Role, user.ClinicianId);
+    }
+    public async Task<AuthenticatedUserView> Update(Guid facilityId, Guid id, UpdateStaffRequest request, CancellationToken ct)
+    {
+        var user = await db.StaffUsers.SingleOrDefaultAsync(x => x.Id == id && x.FacilityId == facilityId, ct) ?? throw new NotFoundError();
+        user.Update(request.DisplayName, request.Role, request.ClinicianId); if (!request.IsActive) user.Deactivate(); await db.SaveChangesAsync(ct);
+        return new(user.Id, user.FacilityId, user.Email.ToLowerInvariant(), user.DisplayName, user.Role, user.ClinicianId);
+    }
 }
 
 public sealed class FacilityApiKeyAuthenticationHandler(

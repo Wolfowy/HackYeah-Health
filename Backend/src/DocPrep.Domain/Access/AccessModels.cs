@@ -30,6 +30,12 @@ public sealed class PatientAccessGrant
     public bool IsValid(DateTimeOffset now) => RevokedAt is null && now < ValidUntil;
     public void MarkOpened(DateTimeOffset now) { if (!IsValid(now)) throw new DomainException("access.expired", "Access has expired."); OpenedAt ??= now; }
     public void Revoke(DateTimeOffset now) => RevokedAt ??= now;
+    public void ChangeValidity(DateTimeOffset validUntil, DateTimeOffset now)
+    {
+        if (RevokedAt is not null) return;
+        if (validUntil <= now) { Revoke(now); return; }
+        ValidUntil = validUntil;
+    }
 }
 
 public enum DeliveryStatus { Pending, Delivered, Failed }

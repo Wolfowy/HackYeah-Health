@@ -28,6 +28,8 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<StaffUser> StaffUsers => Set<StaffUser>();
     public DbSet<StaffRefreshToken> StaffRefreshTokens => Set<StaffRefreshToken>();
+    public DbSet<PatientAccount> PatientAccounts => Set<PatientAccount>();
+    public DbSet<PatientRefreshToken> PatientRefreshTokens => Set<PatientRefreshToken>();
     public DbSet<AgentInterview> AgentInterviews => Set<AgentInterview>();
     public DbSet<AgentInterviewSession> AgentInterviewSessions => Set<AgentInterviewSession>();
     public DbSet<InterviewInvitation> InterviewInvitations => Set<InterviewInvitation>();
@@ -52,11 +54,28 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
             e.Property(x => x.ConcurrencyVersion).IsConcurrencyToken();
             e.HasOne<StaffUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
+        b.Entity<PatientAccount>(e =>
+        {
+            e.ToTable("patient_accounts"); e.HasKey(x => x.Id); e.HasIndex(x => x.Email).IsUnique();
+            e.HasIndex(x => x.PatientIdentityId).IsUnique(); e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.DisplayName).HasMaxLength(200); e.Property(x => x.AvatarUrl).HasMaxLength(2000);
+            e.Property(x => x.PasswordHash).HasMaxLength(2000);
+            e.HasOne<PatientIdentity>().WithOne().HasForeignKey<PatientAccount>(x => x.PatientIdentityId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<PatientRefreshToken>(e =>
+        {
+            e.ToTable("patient_refresh_tokens"); e.HasKey(x => x.Id); e.HasIndex(x => x.TokenHash).IsUnique();
+            e.Property(x => x.TokenHash).HasMaxLength(128); e.Property(x => x.ReplacedByTokenHash).HasMaxLength(128);
+            e.Property(x => x.ConcurrencyVersion).IsConcurrencyToken();
+            e.HasOne<PatientAccount>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<AgentInterview>(e =>
         {
-            e.ToTable("agent_interviews"); e.HasKey(x => x.Id); e.HasIndex(x => x.VisitProcessId).IsUnique();
+            e.ToTable("agent_interviews"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.VisitProcessId, x.Generation }).IsUnique();
             e.Property(x => x.Status).HasConversion<string>(); e.Property(x => x.InterviewType).HasMaxLength(100);
             e.Property(x => x.StructuredDataJson).HasColumnType("jsonb");
+            e.Property(x => x.ExtractionStatus).HasConversion<string>(); e.Property(x => x.ImportStatus).HasConversion<string>();
+            e.Property(x => x.ExtractionIssuesJson).HasColumnType("jsonb");
             e.HasOne<VisitProcess>().WithMany().HasForeignKey(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<AgentInterviewSession>(e =>
@@ -78,6 +97,7 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
         {
             e.ToTable("external_webhook_events"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.Provider, x.ExternalEventId }).IsUnique();
             e.Property(x => x.Provider).HasMaxLength(50); e.Property(x => x.ExternalEventId).HasMaxLength(300); e.Property(x => x.PayloadHash).HasMaxLength(128);
+            e.HasOne<VisitProcess>().WithMany().HasForeignKey(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<PatientIdentity>(e => { e.ToTable("patients"); e.HasKey(x => x.Id); e.HasIndex(x => x.CorrelationKey).IsUnique(); e.Property(x => x.CorrelationKey).HasMaxLength(128); });
         b.Entity<VisitProcess>(e =>
@@ -86,6 +106,10 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
             e.HasOne<Facility>().WithMany().HasForeignKey(x => x.FacilityId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<PatientIdentity>().WithMany().HasForeignKey(x => x.PatientIdentityId).OnDelete(DeleteBehavior.Cascade);
             e.Property(x => x.Status).HasConversion<string>(); e.Property(x => x.ContactChannel).HasConversion<string>(); e.Property(x => x.ConcurrencyVersion).IsConcurrencyToken();
+            e.Property(x => x.TimeZone).HasMaxLength(100); e.Property(x => x.DoctorName).HasMaxLength(200);
+            e.Property(x => x.DoctorSpecialty).HasMaxLength(200); e.Property(x => x.FacilityName).HasMaxLength(200);
+            e.Property(x => x.FacilityAddress).HasMaxLength(500); e.Property(x => x.Room).HasMaxLength(100);
+            e.Property(x => x.VisitType).HasMaxLength(100); e.Property(x => x.LocationInstructions).HasMaxLength(1000);
         });
         b.Entity<PatientAccessGrant>(e =>
         {
@@ -93,7 +117,7 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
             e.HasOne<VisitProcess>().WithMany().HasForeignKey(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<DeliveryAttempt>(e => { e.ToTable("delivery_attempts"); e.HasKey(x => x.Id); e.Property(x => x.Status).HasConversion<string>(); e.HasOne<VisitProcess>().WithMany().HasForeignKey(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade); });
-        b.Entity<InterviewDraft>(e => { e.ToTable("interview_drafts"); e.HasKey(x => x.Id); e.HasIndex(x => x.VisitProcessId).IsUnique(); e.HasOne<VisitProcess>().WithOne().HasForeignKey<InterviewDraft>(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade); });
+        b.Entity<InterviewDraft>(e => { e.ToTable("interview_drafts"); e.HasKey(x => x.Id); e.HasIndex(x => x.VisitProcessId).IsUnique(); e.Property(x => x.MedicationsState).HasConversion<string>(); e.Property(x => x.AllergiesState).HasConversion<string>(); e.Property(x => x.ChronicConditionsState).HasConversion<string>(); e.HasOne<VisitProcess>().WithOne().HasForeignKey<InterviewDraft>(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade); });
         Child<InterviewAnswer>(b, "interview_answers", "InterviewDraftId", nameof(InterviewDraft.Answers));
         Child<Symptom>(b, "symptoms", "InterviewDraftId", nameof(InterviewDraft.Symptoms));
         Child<Medication>(b, "medications", "InterviewDraftId", nameof(InterviewDraft.Medications));
@@ -101,7 +125,7 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
         Child<ChronicCondition>(b, "chronic_conditions", "InterviewDraftId", nameof(InterviewDraft.ChronicConditions));
         Child<PatientQuestion>(b, "patient_questions", "InterviewDraftId", nameof(InterviewDraft.PatientQuestions));
         Child<Clarification>(b, "clarifications", "InterviewDraftId", nameof(InterviewDraft.Clarifications));
-        b.Entity<SymptomTimelineEntry>(e => { e.ToTable("symptom_timeline"); e.HasKey(x => x.Id); e.HasOne<Symptom>().WithMany(x => x.Timeline).HasForeignKey(x => x.SymptomId).OnDelete(DeleteBehavior.Cascade); });
+        b.Entity<SymptomTimelineEntry>(e => { e.ToTable("symptom_timeline"); e.HasKey(x => x.Id); e.Property(x => x.Id).ValueGeneratedNever(); e.HasOne<Symptom>().WithMany(x => x.Timeline).HasForeignKey(x => x.SymptomId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<InterviewAnswer>().Property(x => x.Mode).HasConversion<string>(); b.Entity<Symptom>().Property(x => x.StartedOnState).HasConversion<string>();
         b.Entity<Medication>().Property(x => x.DoseState).HasConversion<string>(); b.Entity<Clarification>().Property(x => x.Kind).HasConversion<string>();
         b.Entity<ObservationProposal>(e =>
@@ -121,5 +145,5 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
     }
 
     private static void Child<T>(ModelBuilder b, string table, string foreignKey, string navigation) where T : class
-    { var e = b.Entity<T>(); e.ToTable(table); e.HasKey("Id"); e.HasOne<InterviewDraft>().WithMany(navigation).HasForeignKey(foreignKey).OnDelete(DeleteBehavior.Cascade); }
+    { var e = b.Entity<T>(); e.ToTable(table); e.HasKey("Id"); e.Property<Guid>("Id").ValueGeneratedNever(); e.HasOne<InterviewDraft>().WithMany(navigation).HasForeignKey(foreignKey).OnDelete(DeleteBehavior.Cascade); }
 }

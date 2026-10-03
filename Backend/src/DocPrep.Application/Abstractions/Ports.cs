@@ -13,6 +13,7 @@ namespace DocPrep.Application.Abstractions;
 public interface IDocPrepStore
 {
     Task<PatientIdentity?> FindPatient(string correlationKey, CancellationToken ct);
+    Task<VisitProcess?> FindVisit(Guid facilityId, string externalVisitId, CancellationToken ct);
     Task<VisitProcess?> GetVisit(Guid id, CancellationToken ct);
     Task<InterviewDraft?> GetDraft(Guid visitId, CancellationToken ct);
     Task<PatientAccessGrant?> FindAccessByLinkHash(string hash, CancellationToken ct);
@@ -31,7 +32,10 @@ public interface IDocPrepStore
     Task<DeletionRequest?> GetDeletionRequest(Guid id, CancellationToken ct);
     Task<AgentInterview?> GetAgentInterview(Guid id, CancellationToken ct);
     Task<AgentInterview?> GetAgentInterviewByVisit(Guid visitId, CancellationToken ct);
+    Task<IReadOnlyList<AgentInterview>> GetAgentInterviewsByVisit(Guid visitId, CancellationToken ct);
+    Task<int> CountAgentInterviews(Guid visitId, CancellationToken ct);
     Task<AgentInterviewSession?> GetAgentInterviewSession(Guid id, CancellationToken ct);
+    Task<IReadOnlyList<AgentInterviewSession>> GetAgentInterviewSessions(Guid interviewId, CancellationToken ct);
     Task<int> CountAgentInterviewSessions(Guid interviewId, CancellationToken ct);
     Task<bool> HasNewerAgentSession(Guid interviewId, DateTimeOffset createdAt, CancellationToken ct);
     Task<AgentInterviewSession?> GetAgentSessionByConversation(string conversationId, CancellationToken ct);
@@ -64,7 +68,7 @@ public interface IPatientSessionStore
 public interface INotificationSender
 {
     Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode, string interviewInvitationToken, CancellationToken ct);
-    Task<NotificationResult> SendSupplementation(string channel, string destination, CancellationToken ct);
+    Task<NotificationResult> SendSupplementation(string channel, string destination, string interviewInvitationToken, CancellationToken ct);
 }
 public sealed record NotificationResult(bool Delivered, string? ProviderId, string? Error);
 public interface IInterviewQuestionProvider { Task<string?> Next(InterviewDraft draft, CancellationToken ct); }
@@ -75,6 +79,8 @@ public interface IElevenLabsClient
 {
     Task<ElevenLabsCredential> CreateVoiceCredential(string participantName, CancellationToken ct);
     Task<ElevenLabsCredential> CreateTextCredential(string participantName, CancellationToken ct);
+    Task<System.Text.Json.JsonElement> GetConversation(string conversationId, CancellationToken ct) =>
+        throw new NotSupportedException("Conversation recovery is not supported by this provider.");
 }
 public sealed record ElevenLabsCredential(string? ConversationToken, string? SignedUrl, string? ConversationId);
 public interface IElevenLabsWebhookVerifier { bool IsValid(ReadOnlySpan<byte> rawBody, string? signatureHeader, DateTimeOffset now); }

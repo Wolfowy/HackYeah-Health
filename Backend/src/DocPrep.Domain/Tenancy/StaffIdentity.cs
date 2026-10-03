@@ -52,6 +52,9 @@ public sealed class StaffUser
     }
 
     public void ReplacePasswordHash(string passwordHash) => PasswordHash = Guard.Required(passwordHash, nameof(passwordHash), 2000);
+    public void Update(string displayName, FacilityRole role, string? clinicianId)
+    { DisplayName = Guard.Required(displayName, nameof(displayName), 200); Role = role; ClinicianId = clinicianId?.Trim(); }
+    public void Deactivate() => IsActive = false;
 
     public static string NormalizeEmail(string email) => Guard.Required(email, nameof(email), 320).ToUpperInvariant();
 }

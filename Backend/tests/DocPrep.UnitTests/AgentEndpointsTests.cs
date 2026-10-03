@@ -76,7 +76,12 @@ public sealed class AgentEndpointsTests
             var body = JsonSerializer.Serialize(new { type = "post_call_transcription", event_timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), data = new {
                 agent_id = "agent-test", conversation_id = conversationId, status = "done",
                 transcript = new[] { new { role = "user", message = "Ból głowy" } },
-                analysis = new { transcript_summary = summary, data_collection_results = new { reason = new { value = "Ból głowy" } } }, metadata = new { }
+                analysis = new { transcript_summary = summary, data_collection_results = new { interview_json = new { value = JsonSerializer.Serialize(new {
+                    schemaVersion = 1, consultationReason = "Ból głowy", symptoms = new[] { new { name = "Ból głowy", severity = 6, startedOnState = "unknown", timeline = Array.Empty<object>() } },
+                    medications = new[] { new { name = "Ibuprofen", doseState = "unknown", reason = "ból" } },
+                    allergies = new[] { new { substance = "penicylina", reaction = "wysypka" } }, chronicConditions = Array.Empty<object>(),
+                    patientQuestions = Array.Empty<string>(), medicationsState = "provided", allergiesState = "provided", chronicConditionsState = "provided"
+                }) } } }, metadata = new { }
             } });
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var hash = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes("webhook-test-secret"), Encoding.UTF8.GetBytes($"{timestamp}.{body}")));
@@ -111,23 +116,39 @@ public sealed class AgentEndpointsTests
             var text = await textResponse.Content.ReadFromJsonAsync<JsonElement>();
             var textSession = text.GetProperty("sessionId").GetGuid();
             Assert.Equal("wss://temporary-text", text.GetProperty("signedUrl").GetString());
-            Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/interview-sessions/{textSession}/provider-conversation", new { conversationId = text.GetProperty("conversationId").GetString() })).StatusCode);
+            var bind = await client.PutAsJsonAsync($"/api/interview-sessions/{textSession}/provider-conversation", new { conversationId = text.GetProperty("conversationId").GetString() });
+            Assert.True(bind.StatusCode == HttpStatusCode.NoContent, await bind.Content.ReadAsStringAsync());
             await client.PostAsJsonAsync($"/api/interview-sessions/{textSession}/end", new { });
             var processing = await client.GetFromJsonAsync<JsonElement>($"/api/interviews/{interviewId}/result");
             Assert.Equal("processing", processing.GetProperty("status").GetString());
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync("/api/webhooks/elevenlabs", new StringContent("{}"))).StatusCode);
-            Assert.Equal(HttpStatusCode.OK, (await Webhook(text.GetProperty("conversationId").GetString()!, "Pacjent opisuje ból głowy.")).StatusCode);
+            var finalWebhook = await Webhook(text.GetProperty("conversationId").GetString()!, "Pacjent opisuje ból głowy.");
+            Assert.True(finalWebhook.StatusCode == HttpStatusCode.OK, await finalWebhook.Content.ReadAsStringAsync());
             Assert.Equal(HttpStatusCode.OK, (await Webhook(text.GetProperty("conversationId").GetString()!, "Zmiana przy ponowieniu")).StatusCode);
             var completed = await client.GetFromJsonAsync<JsonElement>($"/api/interviews/{interviewId}/result");
             Assert.Equal("completed", completed.GetProperty("status").GetString());
             Assert.Equal("Pacjent opisuje ból głowy.", completed.GetProperty("finalReport").GetString());
-            Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync($"/api/public/interviews/{token}")).StatusCode);
+            Assert.Equal("partial", completed.GetProperty("extractionStatus").GetString());
+            Assert.Equal("ready", completed.GetProperty("importStatus").GetString());
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/public/interviews/{token}")).StatusCode);
+            var review = await client.GetFromJsonAsync<JsonElement>("/api/v1/interview");
+            foreach (var observation in review.GetProperty("observations").EnumerateArray())
+                Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/v1/interview/observations/{observation.GetProperty("id").GetGuid()}/decision", new { decision = "Accepted" })).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/interview/complete", null)).StatusCode);
+            var approvedResponse = await client.PostAsJsonAsync("/api/v1/interview/approve", new { confirmIncompleteReport = true });
+            Assert.Equal(HttpStatusCode.OK, approvedResponse.StatusCode);
+            var approved = await approvedResponse.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync("/api/v1/interview/consent", new { granted = true })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await facility.GetAsync($"/api/v1/integration/visits/{visits[0]}/report-versions/{approved.GetProperty("versionId").GetGuid()}")).StatusCode);
             using (var scope = factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<DocPrepDbContext>();
                 Assert.Contains("Ból głowy", (await db.AgentInterviewSessions.FindAsync(textSession))!.TranscriptJson!);
-                Assert.False(await db.Consents.AnyAsync(x => x.VisitProcessId == visits[0]));
-                Assert.False(await db.ReportVersions.AnyAsync(x => x.VisitProcessId == visits[0]));
+                Assert.True(await db.Consents.AnyAsync(x => x.VisitProcessId == visits[0]));
+                Assert.True(await db.ReportVersions.AnyAsync(x => x.VisitProcessId == visits[0]));
+                var draft = await db.Drafts.Include(x => x.Allergies).Include(x => x.Medications).SingleAsync(x => x.VisitProcessId == visits[0]);
+                Assert.Contains(draft.Allergies, x => x.Substance == "penicylina");
+                Assert.Contains(draft.Medications, x => x.Reason == "ból");
             }
             var secondId = secondVisit.GetProperty("interviewId").GetGuid();
             client.DefaultRequestHeaders.Authorization = new("Bearer", await Authorize(secondVisit.GetProperty("interviewInvitationToken").GetString()!));

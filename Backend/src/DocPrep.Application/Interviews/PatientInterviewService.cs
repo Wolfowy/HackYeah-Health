@@ -36,7 +36,11 @@ public sealed class PatientInterviewService(IDocPrepStore store, IInterviewQuest
     public async Task<PatientInterviewView> ReplaceDraft(Guid visitId, ReplaceDraftCommand command, CancellationToken ct)
     {
         var visit = await ActiveVisit(visitId, ct); var draft = await Draft(visitId, ct);
-        draft.Replace(command.ConsultationReason, command.Symptoms, command.Medications, command.Allergies, command.ChronicConditions, command.Questions, clock.UtcNow);
+        if (command.ExpectedRevision is not null && command.ExpectedRevision != draft.Revision)
+            throw new ConflictError("draft.revision_conflict", "The draft was changed by another operation. Reload it before saving.");
+        draft.Replace(command.ConsultationReason, command.Symptoms, command.Medications, command.Allergies,
+            command.ChronicConditions, command.Questions, command.AdditionalNotes, command.MedicationsState,
+            command.AllergiesState, command.ChronicConditionsState, clock.UtcNow);
         visit.MarkDraftChanged(clock.UtcNow); await RebuildObservations(visit, draft, ct); await store.Save(ct); return await Get(visitId, ct);
     }
 
@@ -152,14 +156,14 @@ public sealed class PatientInterviewService(IDocPrepStore store, IInterviewQuest
     }
 
     private static ReportSnapshot BuildSnapshot(Guid id, int number, Domain.Visits.VisitProcess visit, InterviewDraft draft, IReadOnlyList<ObservationProposal> observations, SupplementationRound? round, bool incomplete, DateTimeOffset now) =>
-        new(id, number, 1, visit.Id, visit.ExternalVisitId, visit.FacilityId, visit.ScheduledAt, now, draft.ConsultationReason ?? "",
+        new(id, number, 2, visit.Id, visit.ExternalVisitId, visit.FacilityId, visit.ScheduledAt, now, draft.ConsultationReason ?? "",
             draft.Symptoms.Select(x => new ReportSymptom(x.Name, x.StartedOn, x.Frequency, x.Severity, x.DailyImpact, x.Description, x.Timeline.Select(t => new TimelineData(t.OccurredOn, t.Period, t.Description)).ToList(), x.Source.ToString())).ToList(),
-            draft.Medications.Select(x => new ReportMedication(x.Name, x.Dose, x.Schedule, x.Source.ToString())).ToList(),
+            draft.Medications.Select(x => new ReportMedication(x.Name, x.Dose, x.Schedule, x.Source.ToString(), x.Reason)).ToList(),
             draft.Allergies.Select(x => new ReportAllergy(x.Substance, x.Reaction, x.Source.ToString())).ToList(),
             draft.ChronicConditions.Select(x => new ReportCondition(x.Name, x.Description, x.Source.ToString())).ToList(), draft.PatientQuestions.Select(x => x.Text).ToList(),
             draft.Clarifications.Select(x => new ReportClarification(x.FieldPath, x.Kind.ToString(), x.Message)).ToList(),
             observations.Where(x => x.Decision is ObservationDecision.Accepted or ObservationDecision.EditedAndAccepted).Select(x => new ReportObservation(x.Id, x.SymptomName, x.Kind.ToString(), x.ReportText, x.Decision == ObservationDecision.EditedAndAccepted, "AiObservation")).ToList(),
-            round?.Questions.Where(x => x.Answer is not null).Select(x => new ReportSupplementation(x.Text, x.Answer!.Text, x.Answer.Mode.ToString(), "Clinician")).ToList() ?? [], incomplete);
+            round?.Questions.Where(x => x.Answer is not null).Select(x => new ReportSupplementation(x.Text, x.Answer!.Text, x.Answer.Mode.ToString(), "Clinician")).ToList() ?? [], incomplete, draft.AdditionalNotes);
 
     private async Task<Domain.Visits.VisitProcess> ActiveVisit(Guid id, CancellationToken ct)
     { var visit = await store.GetVisit(id, ct) ?? throw new NotFoundError(); visit.Open(clock.UtcNow); return visit; }
@@ -168,8 +172,9 @@ public sealed class PatientInterviewService(IDocPrepStore store, IInterviewQuest
     private static PatientObservationView MapPatientObservation(ObservationProposal x) => new(x.Id, x.SymptomName, x.Kind, x.PatientEditedText ?? x.OriginalText, x.Decision, x.Decision == ObservationDecision.EditedAndAccepted);
     private static DraftView MapDraft(InterviewDraft x) => new(x.ConsultationReason, x.Revision,
         x.Symptoms.Select(s => new SymptomData(s.Name, s.StartedOn, s.StartedOnState, s.Frequency, s.Severity, s.DailyImpact, s.Description, s.Timeline.Select(t => new TimelineData(t.OccurredOn, t.Period, t.Description)).ToList())).ToList(),
-        x.Medications.Select(m => new MedicationData(m.Name, m.Dose, m.DoseState, m.Schedule)).ToList(), x.Allergies.Select(a => new AllergyData(a.Substance, a.Reaction)).ToList(),
+        x.Medications.Select(m => new MedicationData(m.Name, m.Dose, m.DoseState, m.Schedule, m.Reason)).ToList(), x.Allergies.Select(a => new AllergyData(a.Substance, a.Reaction)).ToList(),
         x.ChronicConditions.Select(c => new ConditionData(c.Name, c.Description)).ToList(), x.PatientQuestions.Select(q => q.Text).ToList(),
-        x.Clarifications.Select(c => new ClarificationView(c.Id, c.FieldPath, c.Kind.ToString(), c.Message)).ToList());
+        x.Clarifications.Select(c => new ClarificationView(c.Id, c.FieldPath, c.Kind.ToString(), c.Message)).ToList(),
+        x.AdditionalNotes, x.MedicationsState, x.AllergiesState, x.ChronicConditionsState);
     private static SupplementationRoundView MapRound(SupplementationRound x) => new(x.Id, x.Number, x.Status.ToString(), x.Questions.Select(q => new SupplementationQuestionView(q.Id, q.Text, q.Answer?.Text, q.Answer?.Mode)).ToList());
 }

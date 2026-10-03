@@ -5,17 +5,20 @@ namespace DocPrep.Domain.Interviews;
 public enum AgentInterviewStatus { Pending, InProgress, Processing, Completed, Cancelled, Expired }
 public enum InterviewSessionMode { Voice, Text }
 public enum InterviewSessionStatus { Created, TokenIssued, Connected, Processing, Completed, Failed, Abandoned }
+public enum ExtractionStatus { Pending, Ready, Partial, Failed }
+public enum ImportStatus { Pending, Ready, Failed }
 
 public sealed class AgentInterview
 {
     private AgentInterview() { }
 
-    public AgentInterview(Guid visitProcessId, string interviewType, DateTimeOffset now)
+    public AgentInterview(Guid visitProcessId, string interviewType, DateTimeOffset now, int generation = 1)
     {
         Id = Guid.NewGuid();
         VisitProcessId = visitProcessId;
         InterviewType = Guard.Required(interviewType, nameof(interviewType), 100);
-        Status = AgentInterviewStatus.Pending;
+        if (generation < 1) throw new DomainException("agent_interview.invalid_generation", "Generation must be positive.");
+        Generation = generation; Status = AgentInterviewStatus.Pending;
         CreatedAt = now;
     }
 
@@ -23,11 +26,18 @@ public sealed class AgentInterview
     public Guid VisitProcessId { get; private set; }
     public AgentInterviewStatus Status { get; private set; }
     public string InterviewType { get; private set; } = "";
+    public int Generation { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? FinalReport { get; private set; }
     public string? StructuredDataJson { get; private set; }
+    public int? StructuredDataSchemaVersion { get; private set; }
+    public ExtractionStatus ExtractionStatus { get; private set; } = ExtractionStatus.Pending;
+    public ImportStatus ImportStatus { get; private set; } = ImportStatus.Pending;
+    public string ExtractionIssuesJson { get; private set; } = "[]";
+    public Guid? ImportedFromSessionId { get; private set; }
+    public int? ImportedDraftRevision { get; private set; }
 
     public void Start(DateTimeOffset now)
     {
@@ -44,6 +54,37 @@ public sealed class AgentInterview
         StructuredDataJson = structuredDataJson;
         CompletedAt = now;
         Status = AgentInterviewStatus.Completed;
+    }
+
+    public void RecordExtraction(string? normalizedJson, int? schemaVersion, ExtractionStatus status,
+        string issuesJson, Guid sourceSessionId)
+    {
+        StructuredDataJson = normalizedJson;
+        StructuredDataSchemaVersion = schemaVersion;
+        ExtractionStatus = status;
+        ExtractionIssuesJson = Guard.Required(issuesJson, nameof(issuesJson), 32000);
+        ImportedFromSessionId = sourceSessionId;
+        ImportStatus = ImportStatus.Pending;
+    }
+
+    public void ImportSucceeded(int draftRevision)
+    {
+        ImportedDraftRevision = draftRevision;
+        ImportStatus = ImportStatus.Ready;
+    }
+
+    public void ImportFailed() => ImportStatus = ImportStatus.Failed;
+
+    public void Cancel(DateTimeOffset now)
+    {
+        if (Status == AgentInterviewStatus.Cancelled) return;
+        Status = AgentInterviewStatus.Cancelled; CompletedAt ??= now;
+    }
+
+    public void EnsureCanStart()
+    {
+        if (Status is AgentInterviewStatus.Completed or AgentInterviewStatus.Cancelled or AgentInterviewStatus.Expired)
+            throw new DomainException("agent_interview.inactive", "The interview cannot be started.");
     }
 
     public void Processing()
@@ -145,9 +186,10 @@ public sealed class InterviewInvitation
     public uint ConcurrencyVersion { get; private set; }
 
     public bool IsUsable(DateTimeOffset now) => RevokedAt is null && CompletedAt is null && now < ExpiresAt && SessionCount < MaxSessionCount;
+    public bool CanReview(DateTimeOffset now) => RevokedAt is null && now < ExpiresAt;
     public void Open(DateTimeOffset now)
     {
-        EnsureUsable(now);
+        if (!CanReview(now)) throw new DomainException("agent_invitation.expired", "The invitation expired or was revoked.");
         FirstOpenedAt ??= now;
     }
     public void UseSession(DateTimeOffset now)
@@ -158,6 +200,12 @@ public sealed class InterviewInvitation
     }
     public void Complete(DateTimeOffset now) { CompletedAt ??= now; ConcurrencyVersion++; }
     public void Revoke(DateTimeOffset now) { RevokedAt ??= now; ConcurrencyVersion++; }
+    public void ChangeExpiry(DateTimeOffset expiresAt, DateTimeOffset now)
+    {
+        if (RevokedAt is not null || CompletedAt is not null) return;
+        if (expiresAt <= now) { Revoke(now); return; }
+        ExpiresAt = expiresAt; ConcurrencyVersion++;
+    }
     private void EnsureUsable(DateTimeOffset now)
     {
         if (RevokedAt is not null) throw new DomainException("agent_invitation.revoked", "The invitation was revoked.");
@@ -170,17 +218,19 @@ public sealed class InterviewInvitation
 public sealed class ExternalWebhookEvent
 {
     private ExternalWebhookEvent() { }
-    public ExternalWebhookEvent(string provider, string externalEventId, string payloadHash, DateTimeOffset now)
+    public ExternalWebhookEvent(string provider, string externalEventId, string payloadHash, DateTimeOffset now, Guid? visitProcessId = null)
     {
         Id = Guid.NewGuid(); Provider = Guard.Required(provider, nameof(provider), 50);
-        ExternalEventId = Guard.Required(externalEventId, nameof(externalEventId), 300);
+        ExternalEventId = Guard.Required(externalEventId, nameof(externalEventId), 300); VisitProcessId = visitProcessId;
         PayloadHash = Guard.Required(payloadHash, nameof(payloadHash), 128); ReceivedAt = now;
     }
     public Guid Id { get; private set; }
     public string Provider { get; private set; } = "";
     public string ExternalEventId { get; private set; } = "";
+    public Guid? VisitProcessId { get; private set; }
     public DateTimeOffset ReceivedAt { get; private set; }
     public DateTimeOffset? ProcessedAt { get; private set; }
     public string PayloadHash { get; private set; } = "";
+    public void AttachToVisit(Guid visitProcessId) => VisitProcessId ??= visitProcessId;
     public void Process(DateTimeOffset now) => ProcessedAt ??= now;
 }

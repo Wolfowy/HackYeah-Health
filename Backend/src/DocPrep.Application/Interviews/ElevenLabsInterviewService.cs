@@ -10,8 +10,10 @@ using DocPrep.Domain.Visits;
 
 namespace DocPrep.Application.Interviews;
 
-public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialService credentials, IElevenLabsClient elevenLabs, IClock clock)
+public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialService credentials, IElevenLabsClient elevenLabs,
+    InterviewExtractionService extraction, IClock clock)
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<AgentInterviewView> GetByVisit(Guid visitId, CancellationToken ct)
     {
         var interview = await store.GetAgentInterviewByVisit(visitId, ct) ?? throw new NotFoundError();
@@ -27,20 +29,28 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
     public async Task<AgentInterviewResultView> Result(Guid interviewId, AgentInterviewAccess access, CancellationToken ct)
     {
         var interview = await AuthorizedInterview(interviewId, access, ct);
-        return new(interview.Id, Status(interview.Status), interview.FinalReport, interview.StructuredDataJson);
+        NormalizedInterviewData? structured = null;
+        if (!string.IsNullOrWhiteSpace(interview.StructuredDataJson))
+            try { structured = JsonSerializer.Deserialize<NormalizedInterviewData>(interview.StructuredDataJson, JsonOptions); } catch (JsonException) { }
+        IReadOnlyList<ExtractionIssue> issues = [];
+        try { issues = JsonSerializer.Deserialize<List<ExtractionIssue>>(interview.ExtractionIssuesJson, JsonOptions) ?? []; } catch (JsonException) { }
+        return new(interview.Id, Status(interview.Status), interview.FinalReport, interview.StructuredDataJson,
+            structured, interview.StructuredDataSchemaVersion, interview.ExtractionStatus.ToString().ToLowerInvariant(),
+            interview.ImportStatus.ToString().ToLowerInvariant(), issues);
     }
 
     public async Task<InterviewInvitationAccess> AuthorizeInvitation(string rawToken, CancellationToken ct)
     {
-        var invitation = await ValidInvitation(rawToken, ct);
+        var invitation = await ReviewInvitation(rawToken, ct);
         invitation.Open(clock.UtcNow);
         await store.Save(ct);
-        return new(invitation.InterviewId, invitation.Id, invitation.ExpiresAt);
+        var interview = await store.GetAgentInterview(invitation.InterviewId, ct) ?? throw new NotFoundError();
+        return new(invitation.InterviewId, invitation.Id, interview.VisitProcessId, invitation.ExpiresAt);
     }
 
     public async Task<AgentInterviewView> PublicView(string rawToken, CancellationToken ct)
     {
-        var invitation = await ValidInvitation(rawToken, ct);
+        var invitation = await ReviewInvitation(rawToken, ct);
         var interview = await store.GetAgentInterview(invitation.InterviewId, ct) ?? throw new NotFoundError();
         return await View(interview, ct);
     }
@@ -48,6 +58,7 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
     public async Task<AgentSessionResult> CreateSession(Guid interviewId, InterviewSessionMode mode, AgentInterviewAccess access, CancellationToken ct)
     {
         var interview = await AuthorizedInterview(interviewId, access, ct);
+        interview.EnsureCanStart();
         var visit = await ActiveVisit(interview.VisitProcessId, ct);
         InterviewInvitation? invitation = null;
         if (access.InvitationId is not null)
@@ -82,7 +93,7 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
 
     public async Task<AgentSessionResult> CreatePublicSession(string rawToken, InterviewSessionMode mode, CancellationToken ct)
     {
-        var invitation = await ValidInvitation(rawToken, ct);
+        var invitation = await ExecutableInvitation(rawToken, ct);
         return await CreateSession(invitation.InterviewId, mode, AgentInterviewAccess.ForInvitation(invitation.InterviewId, invitation.Id), ct);
     }
 
@@ -103,6 +114,32 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
         await store.Save(ct);
     }
 
+    public async Task<AgentInterviewResultView> RetryImport(Guid interviewId, AgentInterviewAccess access, CancellationToken ct)
+    {
+        var interview = await AuthorizedInterview(interviewId, access, ct);
+        if (string.IsNullOrWhiteSpace(interview.StructuredDataJson))
+            throw new ConflictError("extraction.not_available", "No normalized extraction is available.");
+        var data = JsonSerializer.Deserialize<NormalizedInterviewData>(interview.StructuredDataJson, JsonOptions)
+            ?? throw new ConflictError("extraction.invalid", "The normalized extraction is invalid.");
+        if (!await extraction.Import(interview.Id, interview.ImportedFromSessionId ?? Guid.Empty, data, ct))
+            throw new ConflictError("import.manual_changes", "The draft contains newer patient changes and cannot be overwritten.");
+        await store.Save(ct);
+        return await Result(interviewId, access, ct);
+    }
+
+    public async Task Recover(Guid sessionId, AgentInterviewAccess access, string expectedAgentId, CancellationToken ct)
+    {
+        var session = await store.GetAgentInterviewSession(sessionId, ct) ?? throw new NotFoundError();
+        await AuthorizedInterview(session.InterviewId, access, ct);
+        if (string.IsNullOrWhiteSpace(session.ProviderConversationId))
+            throw new ConflictError("agent_session.not_bound", "The session has no provider conversation identifier.");
+        var data = await elevenLabs.GetConversation(session.ProviderConversationId, ct);
+        var timestamp = clock.UtcNow.ToUnixTimeSeconds();
+        var raw = Encoding.UTF8.GetBytes($"{{\"type\":\"post_call_transcription\",\"event_timestamp\":{timestamp},\"data\":{data.GetRawText()}}}");
+        using var document = JsonDocument.Parse(raw);
+        await ProcessWebhook(document.RootElement, PayloadHash(raw), expectedAgentId, ct);
+    }
+
     public async Task ProcessWebhook(JsonElement root, string payloadHash, string expectedAgentId, CancellationToken ct)
     {
         if (!root.TryGetProperty("type", out var typeElement) || typeElement.GetString() != "post_call_transcription") return;
@@ -113,11 +150,19 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
         if (!string.Equals(agentId, expectedAgentId, StringComparison.Ordinal)) throw new ForbiddenError("Unexpected ElevenLabs agent.");
         var timestamp = root.TryGetProperty("event_timestamp", out var timestampElement) ? timestampElement.ToString() : "unknown";
         var externalEventId = $"post_call_transcription:{conversationId}:{timestamp}";
-        if (await store.GetWebhookEvent("elevenlabs", externalEventId, ct) is not null) return;
+        var webhookEvent = await store.GetWebhookEvent("elevenlabs", externalEventId, ct);
+        if (webhookEvent?.ProcessedAt is not null) return;
+        if (webhookEvent is null)
+        {
+            webhookEvent = new ExternalWebhookEvent("elevenlabs", externalEventId, payloadHash, clock.UtcNow);
+            store.Add(webhookEvent);
+            // Potwierdzenie odbioru przeżywa błąd dalszego mapowania; ponowienie tego samego webhooka dokończy pracę.
+            await store.Save(ct);
+        }
 
         var session = await store.GetAgentSessionByConversation(conversationId, ct) ?? throw new NotFoundError("Unknown ElevenLabs conversation.");
-        var webhookEvent = new ExternalWebhookEvent("elevenlabs", externalEventId, payloadHash, clock.UtcNow);
-        store.Add(webhookEvent);
+        var interview = await store.GetAgentInterview(session.InterviewId, ct) ?? throw new NotFoundError();
+        webhookEvent.AttachToVisit(interview.VisitProcessId);
         if (session.Status != InterviewSessionStatus.Completed)
         {
             var transcript = data.TryGetProperty("transcript", out var transcriptElement) ? transcriptElement.GetRawText() : "[]";
@@ -125,14 +170,33 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
             var metadata = data.TryGetProperty("metadata", out var metadataElement) ? metadataElement.GetRawText() : "{}";
             var report = data.TryGetProperty("analysis", out var reportAnalysis) && reportAnalysis.TryGetProperty("transcript_summary", out var summary)
                 ? summary.GetString() : null;
-            var structured = data.TryGetProperty("analysis", out var structuredAnalysis) && structuredAnalysis.TryGetProperty("data_collection_results", out var collection)
-                ? collection.GetRawText() : analysis;
             var continuesInterview = session.Status == InterviewSessionStatus.Abandoned;
             session.Complete(transcript, analysis, metadata, clock.UtcNow);
-            var interview = await store.GetAgentInterview(session.InterviewId, ct) ?? throw new NotFoundError();
             if (!continuesInterview && !await store.HasNewerAgentSession(interview.Id, session.CreatedAt, ct))
             {
-                interview.Complete(report, structured, clock.UtcNow);
+                var outcomes = new List<ExtractionOutcome>();
+                foreach (var completedSession in await store.GetAgentInterviewSessions(interview.Id, ct))
+                {
+                    if (string.IsNullOrWhiteSpace(completedSession.AnalysisJson)) continue;
+                    try
+                    {
+                        using var analysisDocument = JsonDocument.Parse(completedSession.AnalysisJson);
+                        if (analysisDocument.RootElement.TryGetProperty("data_collection_results", out var values))
+                            outcomes.Add(extraction.Normalize(values));
+                    }
+                    catch (JsonException)
+                    {
+                        outcomes.Add(new(ExtractionStatus.Failed, null,
+                            [new("data", "invalid_json", "Nie można odczytać danych sesji.")]));
+                    }
+                }
+                var outcome = extraction.Merge(outcomes);
+                var normalizedJson = outcome.Data is null ? null : JsonSerializer.Serialize(outcome.Data, JsonOptions);
+                interview.RecordExtraction(normalizedJson, outcome.Data?.SchemaVersion, outcome.Status,
+                    JsonSerializer.Serialize(outcome.Issues, JsonOptions), session.Id);
+                if (outcome.Data is null || !await extraction.Import(interview.Id, session.Id, outcome.Data, ct))
+                    interview.ImportFailed();
+                interview.Complete(report, normalizedJson, clock.UtcNow);
                 foreach (var invitation in await store.GetInterviewInvitations(interview.Id, ct)) invitation.Complete(clock.UtcNow);
             }
             var visit = await store.GetVisit(interview.VisitProcessId, ct);
@@ -156,16 +220,30 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
         return interview;
     }
 
-    private async Task<InterviewInvitation> ValidInvitation(string rawToken, CancellationToken ct)
+    private async Task<InterviewInvitation> ExecutableInvitation(string rawToken, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(rawToken) || rawToken.Length > 500) throw new NotFoundError();
-        var invitation = await store.FindInterviewInvitation(credentials.Hash(rawToken), ct) ?? throw new NotFoundError();
+        var invitation = await FindInvitation(rawToken, ct);
         if (!invitation.IsUsable(clock.UtcNow)) throw new ConflictError("agent_invitation.inactive", "The invitation is no longer active.");
         var interview = await store.GetAgentInterview(invitation.InterviewId, ct) ?? throw new NotFoundError();
         if (interview.Status is AgentInterviewStatus.Completed or AgentInterviewStatus.Cancelled or AgentInterviewStatus.Expired)
             throw new ConflictError("agent_interview.inactive", "The interview is no longer active.");
         await ActiveVisit(interview.VisitProcessId, ct);
         return invitation;
+    }
+
+    private async Task<InterviewInvitation> ReviewInvitation(string rawToken, CancellationToken ct)
+    {
+        var invitation = await FindInvitation(rawToken, ct);
+        if (!invitation.CanReview(clock.UtcNow)) throw new ConflictError("agent_invitation.inactive", "The invitation is no longer active.");
+        var interview = await store.GetAgentInterview(invitation.InterviewId, ct) ?? throw new NotFoundError();
+        await ActiveVisit(interview.VisitProcessId, ct);
+        return invitation;
+    }
+
+    private async Task<InterviewInvitation> FindInvitation(string rawToken, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken) || rawToken.Length > 500) throw new NotFoundError();
+        return await store.FindInterviewInvitation(credentials.Hash(rawToken), ct) ?? throw new NotFoundError();
     }
 
     private async Task<VisitProcess> ActiveVisit(Guid visitId, CancellationToken ct)
@@ -179,10 +257,20 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
     private async Task<AgentInterviewView> View(AgentInterview interview, CancellationToken ct)
     {
         var visit = await store.GetVisit(interview.VisitProcessId, ct) ?? throw new NotFoundError();
+        var details = new VisitDetails(visit.Id, visit.ExternalVisitId, visit.ScheduledAt, visit.TimeZone, visit.ServiceExpiresAt,
+            new(visit.AssignedClinicianId, visit.DoctorName, visit.DoctorSpecialty),
+            new(visit.FacilityId, visit.FacilityName, visit.FacilityAddress), visit.Room, visit.VisitType,
+            visit.LocationInstructions, VisitStatusName(visit.Status), interview.Id, Status(interview.Status));
         return new(interview.Id, "Wywiad przed wizytą", visit.ScheduledAt, Status(interview.Status), interview.InterviewType,
-            await store.CountAgentInterviewSessions(interview.Id, ct));
+            await store.CountAgentInterviewSessions(interview.Id, ct), details);
     }
 
     private static string Status(AgentInterviewStatus status) => status == AgentInterviewStatus.InProgress ? "in_progress" : status.ToString().ToLowerInvariant();
+    private static string VisitStatusName(VisitStatus status) => status switch
+    {
+        VisitStatus.NotStarted => "not_started", VisitStatus.InProgress => "in_progress",
+        VisitStatus.AwaitingApproval => "awaiting_approval", VisitStatus.RequiresSupplementation => "requires_supplementation",
+        _ => status.ToString().ToLowerInvariant()
+    };
     public static string PayloadHash(ReadOnlySpan<byte> payload) => Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
 }

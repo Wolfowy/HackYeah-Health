@@ -14,6 +14,10 @@ public sealed class InterviewDraft
     public Guid Id { get; private set; }
     public Guid VisitProcessId { get; private set; }
     public string? ConsultationReason { get; private set; }
+    public string? AdditionalNotes { get; private set; }
+    public FieldState MedicationsState { get; private set; } = FieldState.NotAsked;
+    public FieldState AllergiesState { get; private set; } = FieldState.NotAsked;
+    public FieldState ChronicConditionsState { get; private set; } = FieldState.NotAsked;
     public int Revision { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public List<InterviewAnswer> Answers { get; } = [];
@@ -31,8 +35,17 @@ public sealed class InterviewDraft
 
     public void Replace(string consultationReason, IEnumerable<SymptomData> symptoms, IEnumerable<MedicationData> medications,
         IEnumerable<AllergyData> allergies, IEnumerable<ConditionData> conditions, IEnumerable<string> questions, DateTimeOffset now)
+        => Replace(consultationReason, symptoms, medications, allergies, conditions, questions, null,
+            FieldState.Provided, FieldState.Provided, FieldState.Provided, now);
+
+    public void Replace(string consultationReason, IEnumerable<SymptomData> symptoms, IEnumerable<MedicationData> medications,
+        IEnumerable<AllergyData> allergies, IEnumerable<ConditionData> conditions, IEnumerable<string> questions,
+        string? additionalNotes, FieldState medicationsState, FieldState allergiesState,
+        FieldState chronicConditionsState, DateTimeOffset now)
     {
         ConsultationReason = Guard.Required(consultationReason, nameof(consultationReason), 2000);
+        AdditionalNotes = Optional(additionalNotes, 8000);
+        MedicationsState = medicationsState; AllergiesState = allergiesState; ChronicConditionsState = chronicConditionsState;
         Symptoms.Clear(); Medications.Clear(); Allergies.Clear(); ChronicConditions.Clear(); PatientQuestions.Clear(); Clarifications.Clear();
         Symptoms.AddRange(symptoms.Select(x => new Symptom(Id, x)));
         Medications.AddRange(medications.Select(x => new Medication(Id, x)));
@@ -40,10 +53,25 @@ public sealed class InterviewDraft
         ChronicConditions.AddRange(conditions.Select(x => new ChronicCondition(Id, x)));
         PatientQuestions.AddRange(questions.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => new PatientQuestion(Id, x)));
         foreach (var medication in Medications.Where(x => x.DoseState != FieldState.Provided))
-            Clarifications.Add(new(Id, $"medications.{medication.Id}.dose", medication.DoseState == FieldState.Contradictory ? ClarificationKind.Contradiction : ClarificationKind.Missing, $"Confirm the dose of {medication.Name}."));
+            Clarifications.Add(new(Id, $"medications.{medication.Id}.dose", medication.DoseState == FieldState.Contradictory ? ClarificationKind.Contradiction : ClarificationKind.Missing, $"Potwierdź dawkę leku {medication.Name}."));
         foreach (var symptom in Symptoms.Where(x => x.StartedOnState != FieldState.Provided))
-            Clarifications.Add(new(Id, $"symptoms.{symptom.Id}.startedOn", symptom.StartedOnState == FieldState.Contradictory ? ClarificationKind.Contradiction : ClarificationKind.Missing, $"Confirm when {symptom.Name} began."));
+            Clarifications.Add(new(Id, $"symptoms.{symptom.Id}.startedOn", symptom.StartedOnState == FieldState.Contradictory ? ClarificationKind.Contradiction : ClarificationKind.Missing, $"Potwierdź, kiedy rozpoczął się objaw: {symptom.Name}."));
+        AddCollectionClarification("medications", MedicationsState, "Potwierdź informacje o przyjmowanych lekach.");
+        AddCollectionClarification("allergies", AllergiesState, "Potwierdź informacje o alergiach.");
+        AddCollectionClarification("chronicConditions", ChronicConditionsState, "Potwierdź informacje o chorobach przewlekłych.");
         Touch(now);
+    }
+    private void AddCollectionClarification(string path, FieldState state, string message)
+    {
+        if (state == FieldState.Provided) return;
+        Clarifications.Add(new(Id, path, state == FieldState.Contradictory ? ClarificationKind.Contradiction : state == FieldState.Unknown ? ClarificationKind.Unknown : ClarificationKind.Missing, message));
+    }
+    private static string? Optional(string? value, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var result = value.Trim();
+        if (result.Length > max) throw new DomainException("value.too_long", $"Value exceeds {max} characters.");
+        return result;
     }
     private void Touch(DateTimeOffset now) { Revision++; UpdatedAt = now; }
 }
@@ -85,13 +113,14 @@ public sealed class SymptomTimelineEntry(Guid symptomId, DateOnly? occurredOn, s
 public sealed class Medication
 {
     private Medication() { }
-    internal Medication(Guid draftId, MedicationData x) { Id = Guid.NewGuid(); InterviewDraftId = draftId; Name = Guard.Required(x.Name, nameof(x.Name), 200); Dose = x.Dose; DoseState = x.DoseState; Schedule = x.Schedule; }
+    internal Medication(Guid draftId, MedicationData x) { Id = Guid.NewGuid(); InterviewDraftId = draftId; Name = Guard.Required(x.Name, nameof(x.Name), 200); Dose = x.Dose; DoseState = x.DoseState; Schedule = x.Schedule; Reason = x.Reason; }
     public Guid Id { get; private set; }
     public Guid InterviewDraftId { get; private set; }
     public string Name { get; private set; } = "";
     public string? Dose { get; private set; }
     public FieldState DoseState { get; private set; }
     public string? Schedule { get; private set; }
+    public string? Reason { get; private set; }
     public InformationSource Source { get; private set; } = InformationSource.Patient;
 }
 public sealed class Allergy
@@ -125,6 +154,6 @@ public sealed class Clarification(Guid interviewDraftId, string fieldPath, Clari
 
 public sealed record SymptomData(string Name, DateOnly? StartedOn, FieldState StartedOnState, string? Frequency, int? Severity, string? DailyImpact, string? Description, IReadOnlyList<TimelineData> Timeline);
 public sealed record TimelineData(DateOnly? OccurredOn, string? Period, string Description);
-public sealed record MedicationData(string Name, string? Dose, FieldState DoseState, string? Schedule);
+public sealed record MedicationData(string Name, string? Dose, FieldState DoseState, string? Schedule, string? Reason = null);
 public sealed record AllergyData(string Substance, string? Reaction);
 public sealed record ConditionData(string Name, string? Description);

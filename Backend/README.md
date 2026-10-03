@@ -49,11 +49,12 @@ docker compose up --build
 
 ## Uwierzytelnianie i autoryzacja
 
-Backend rozdziela trzy rodzaje poświadczeń:
+Backend rozdziela cztery rodzaje poświadczeń:
 
 - pacjent: opaque bearer token ograniczony do jednej wizyty i przechowywany w Redisie,
 - użytkownik panelu: krótkotrwały JWT oraz jednorazowo rotowany refresh token,
 - system placówki: `X-Api-Key`, wyłącznie do komunikacji serwer–serwer.
+- opcjonalne konto pacjenta: osobny JWT i rotowany refresh token; konto można założyć dopiero z dostępu do zweryfikowanej wizyty.
 
 Konta demonstracyjne panelu, tworzone tylko w środowisku `Development`:
 
@@ -83,14 +84,16 @@ Wartości są przeznaczone wyłącznie do lokalnego demo. Klucze integracyjne, c
 
 ## Dostęp pacjenta
 
-Pacjent nie posiada konta i nie przekazuje PESEL-u jako poświadczenia. Placówka tworzy wizytę i otrzymuje jednorazowo link token oraz kod. Pacjent wymienia jeden z nich na krótko żyjący opaque bearer token ograniczony do jednego wywiadu:
+Podstawowy proces nie wymaga konta i nie używa PESEL-u jako poświadczenia. Placówka tworzy wizytę i otrzymuje jednorazowo link token oraz kod. Pacjent wymienia jeden z nich na krótko żyjący opaque bearer token ograniczony do jednej wizyty:
 
 ```text
 POST /api/v1/patient-access/link/exchange
 POST /api/v1/patient-access/code/exchange
 ```
 
-Pozostałe endpointy pacjenta używają `Authorization: Bearer <session-token>`. Nie istnieje endpoint przeglądania historii pacjenta.
+Pozostałe endpointy pacjenta używają `Authorization: Bearer <session-token>`. Anonimowy JWT z zaproszenia ElevenLabs zawiera również zakres `report:review`, dlatego po zakończeniu rozmowy może korzystać z istniejących operacji `/api/v1/interview` do korekty, zatwierdzenia i zgody. Nie pozwala już jednak rozpocząć kolejnej rozmowy.
+
+Opcjonalne konto pacjenta udostępnia `/api/v1/patient-account/auth/register|login|refresh`, profil `/me`, listę `/visits` oraz wydanie ograniczonej sesji dla własnej wizyty przez `/visits/{visitId}/session`. Rejestracja wymaga aktywnej, wcześniej zweryfikowanej sesji wizyty.
 
 Frontend powinien po wymianie linku natychmiast usunąć token linku z paska adresu (`history.replaceState`) i przechowywać sesję pacjenta w pamięci, nie w `localStorage`.
 
@@ -146,6 +149,10 @@ GET  /api/interviews/{interviewId}
 GET  /api/interviews/{interviewId}/result
 ```
 
+`result` zwraca kompatybilne `structuredDataJson` oraz typowane `structuredData`, `schemaVersion`, `extractionStatus`, `importStatus` i `issues`. Agent powinien posiadać Data Collection typu String o nazwie `interview_json`, zawierające JSON schematu DocPrep. Niepoprawny JSON otrzymuje status `failed`; częściowe dane nie są przedstawiane jako kompletny raport.
+
+Po finalnym webhooku backend scala wyniki wszystkich sesji, mapuje objawy, leki, alergie, choroby, pytania i uwagi do `InterviewDraft`, ale nie zatwierdza raportu i nie udziela zgody automatycznie. Pacjent korzysta następnie z istniejącego procesu `/api/v1/interview/draft`, `/complete`, `/approve` i `/consent`. Raport JSON/PDF zawiera powód przyjmowania leku, dodatkowe uwagi i chronologię objawów.
+
 Po `/authorize` frontend powinien usunąć surowy token zaproszenia z URL. Dla kompatybilności dostępne jest również bezpośrednie `POST /api/public/interviews/{invitationToken}/sessions`, ale wariant z anonimowym JWT jest bezpieczniejszy.
 
 Pacjent posiadający istniejącą sesję DocPrep może użyć:
@@ -169,7 +176,15 @@ Frontend `Przed wizytą` znajduje się w `Frontend`; instrukcja uruchomienia jes
 
 `POST /api/interview-sessions/{sessionId}/end` przyjmuje `{ "continuesInterview": false }`. Oznacza transport i wywiad jako `processing`; wynik nadal pochodzi wyłącznie z podpisanego webhooka. Przy zmianie głosu na tekst frontend najpierw wysyła `continuesInterview: true`, a następnie zamyka SDK. Taka sesja ma status `Abandoned`, a jej webhook zapisuje transkrypcję bez kończenia wywiadu i zaproszenia. Opóźniony webhook starszej sesji nie zastępuje wyniku nowszej. Nie wymaga to nowej migracji: statusy mają już reprezentację tekstową. Aktualne migracje EF DocPrep zastępują wcześniejszy skrypt SQL HealthPrep; nie należy używać starego skryptu dla schematu `docprep`.
 
-Panel konta pacjenta pozostaje demonstracją. Sesja pacjenta DocPrep może zostać przekazana adapterowi frontendu przez `agentApi.setPatientSession(token)`; nagłówek `X-Patient-Id` nie jest obsługiwany.
+Sesja pacjenta DocPrep może zostać przekazana adapterowi frontendu przez `agentApi.setPatientSession(token)`; nagłówek `X-Patient-Id` nie jest obsługiwany.
+
+### Wizyty, niezawodność i integracje
+
+`POST /api/v1/integration/visits` przyjmuje snapshot lekarza i miejsca (`doctorName`, `doctorSpecialty`, `facilityName`, `facilityAddress`, `room`, `visitType`, `locationInstructions`, `timeZone`). `GET /api/v1/integration/visits` obsługuje `from`, `to`, `status`, `page`, `pageSize`, a `PUT /api/v1/integration/visits/{id}` zmienia termin i przypisanie. Powtórzenie `externalVisitId` kończy się kontrolowanym konfliktem.
+
+Brak webhooka można obsłużyć przez `POST /api/interview-sessions/{id}/recover`, a import ponowić bez nowej rozmowy przez `POST /api/interviews/{id}/result/retry-import`. Ręczna korekta o nowszej rewizji nie jest nadpisywana przez spóźniony webhook. Pytania lekarza tworzą nową generację wywiadu uzupełniającego i zachowują wcześniejsze wersje raportu.
+
+Produkcję powiadomień konfiguruje `Notifications__ProviderUrl`, `Notifications__ApiKey` i `Notifications__FrontendBaseUrl`. Bez URL używany jest adapter demonstracyjny. Adapter HTTP przekazuje gotowy link powrotu; docelowy gateway SMS/e-mail musi obsłużyć ten kontrakt.
 
 ### Test endpointów agenta
 

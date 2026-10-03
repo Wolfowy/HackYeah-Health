@@ -25,6 +25,7 @@ public static class Endpoints
     public static IEndpointRouteBuilder MapDocPrepEndpoints(this IEndpointRouteBuilder app)
     {
         MapAuthentication(app);
+        MapPatientAccounts(app);
         MapElevenLabsInterviews(app);
 
         var access = app.MapGroup("/api/v1/patient-access")
@@ -43,7 +44,7 @@ public static class Endpoints
 
         var patient = app.MapGroup("/api/v1/interview")
             .WithTags("Patient interview")
-            .RequireAuthorization(AuthenticationSchemes.PatientPolicy);
+            .RequireAuthorization(AuthenticationSchemes.InterviewPolicy);
         patient.MapGet("", async (HttpContext ctx, PatientInterviewService service, CancellationToken ct) =>
             Results.Ok(await service.Get(PatientVisit(ctx), ct))).Produces<PatientInterviewView>().ProducesProblem(401).ProducesProblem(404);
         patient.MapPost("/answers", async (SubmitAnswerCommand request, HttpContext ctx, PatientInterviewService service, CancellationToken ct) =>
@@ -108,7 +109,10 @@ public static class Endpoints
         {
             ValidateVisit(request);
             var facility = Facility(ctx, FacilityRole.Administrative, FacilityRole.System);
-            var result = await service.CreateVisit(new(facility.FacilityId, request.ExternalVisitId, request.Pesel, request.ScheduledAt, request.ServiceExpiresAt, request.Contact, request.Channel, request.AssignedClinicianId), ct);
+            var result = await service.CreateVisit(new(facility.FacilityId, request.ExternalVisitId, request.Pesel,
+                request.ScheduledAt, request.ServiceExpiresAt, request.Contact, request.Channel, request.AssignedClinicianId,
+                request.TimeZone, request.DoctorName, request.DoctorSpecialty, request.FacilityName, request.FacilityAddress,
+                request.Room, request.VisitType, request.LocationInstructions), ct);
             return Results.Created($"/api/v1/integration/visits/{result.VisitId}/status", result);
         }).Produces<InvitationResult>(201).ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(409);
         integration.MapPost("/visits/{id:guid}/invitations", async (Guid id, InvitationRequest request, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
@@ -116,10 +120,22 @@ public static class Endpoints
             Required(request.Contact, nameof(request.Contact), 320);
             return Results.Ok(await service.RegenerateInvitation(Facility(ctx, FacilityRole.Administrative, FacilityRole.System).FacilityId, id, request.Contact, ct));
         }).Produces<InvitationResult>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        integration.MapGet("/visits", async (HttpContext ctx, IntegrationService service, CancellationToken ct) =>
-            Results.Ok(await service.Dashboard(Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician).FacilityId, ct))).Produces<IReadOnlyList<AdminVisitView>>().ProducesProblem(401).ProducesProblem(403);
+        integration.MapGet("/visits", async (DateTimeOffset? from, DateTimeOffset? to, Domain.Visits.VisitStatus? status,
+            int page, int pageSize, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
+            Results.Ok(await service.Search(Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician).FacilityId,
+                from, to, status, page == 0 ? 1 : page, pageSize == 0 ? 25 : pageSize, ct)))
+            .Produces<PagedResult<AdminVisitView>>().ProducesProblem(401).ProducesProblem(403);
         integration.MapGet("/visits/{id:guid}/status", async (Guid id, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
             Results.Ok((await service.Dashboard(Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician).FacilityId, ct)).SingleOrDefault(x => x.VisitId == id) ?? throw new NotFoundError())).Produces<AdminVisitView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
+        integration.MapPut("/visits/{id:guid}", async (Guid id, UpdateVisitRequest request, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
+        {
+            ValidateVisitDetails(request.ScheduledAt, request.ServiceExpiresAt, request.TimeZone, request.VisitType);
+            var facility = Facility(ctx, FacilityRole.Administrative, FacilityRole.System);
+            return Results.Ok(await service.Update(facility.FacilityId, id, new(request.ScheduledAt,
+                request.ServiceExpiresAt, request.TimeZone, request.AssignedClinicianId, request.DoctorName,
+                request.DoctorSpecialty, request.FacilityName, request.FacilityAddress, request.Room,
+                request.VisitType, request.LocationInstructions), ct));
+        }).Produces<AdminVisitView>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
         integration.MapPost("/visits/{id:guid}/cancel", async (Guid id, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
         {
             await service.Cancel(Facility(ctx, FacilityRole.Administrative, FacilityRole.System).FacilityId, id, ct);
@@ -133,6 +149,11 @@ public static class Endpoints
         }).Produces<DeletionRequestResponse>(202).ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
         integration.MapGet("/deletion-requests/{id:guid}", async (Guid id, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
             Results.Ok(await service.DeletionStatus(Facility(ctx, FacilityRole.Administrative, FacilityRole.System).FacilityId, id, ct))).Produces<DeletionRequestView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
+        integration.MapPost("/deletion-requests/{id:guid}/retry", async (Guid id, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
+        {
+            await service.RetryDeletion(Facility(ctx, FacilityRole.Administrative, FacilityRole.System).FacilityId, id, ct);
+            return Results.Accepted();
+        }).Produces(202).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
         integration.MapPost("/visits/{id:guid}/consent-revocations", async (Guid id, ConsentRevocationRequest request, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
         {
             Required(request.VerificationReference, nameof(request.VerificationReference), 500);
@@ -182,6 +203,9 @@ public static class Endpoints
             Results.Ok(await service.Get(interviewId, InterviewAccess(ctx), ct))).Produces<AgentInterviewView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
         interviews.MapGet("/{interviewId:guid}/result", async (Guid interviewId, HttpContext ctx, ElevenLabsInterviewService service, CancellationToken ct) =>
             Results.Ok(await service.Result(interviewId, InterviewAccess(ctx), ct))).Produces<AgentInterviewResultView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
+        interviews.MapPost("/{interviewId:guid}/result/retry-import", async (Guid interviewId, HttpContext ctx, ElevenLabsInterviewService service, CancellationToken ct) =>
+            Results.Ok(await service.RetryImport(interviewId, InterviewAccess(ctx), ct)))
+            .Produces<AgentInterviewResultView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
 
         app.MapPut("/api/interview-sessions/{sessionId:guid}/provider-conversation", async (Guid sessionId, ProviderConversationRequest request, HttpContext ctx, ElevenLabsInterviewService service, CancellationToken ct) =>
         {
@@ -197,6 +221,13 @@ public static class Endpoints
             return Results.NoContent();
         }).WithTags("ElevenLabs interviews").RequireAuthorization(AuthenticationSchemes.InterviewPolicy)
             .Produces(204).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
+        app.MapPost("/api/interview-sessions/{sessionId:guid}/recover", async (Guid sessionId, HttpContext ctx,
+            ElevenLabsInterviewService service, IOptions<ElevenLabsOptions> options, CancellationToken ct) =>
+        {
+            await service.Recover(sessionId, InterviewAccess(ctx), options.Value.AgentId, ct);
+            return Results.Accepted();
+        }).WithTags("ElevenLabs interviews").RequireAuthorization(AuthenticationSchemes.InterviewPolicy)
+            .RequireRateLimiting("public-interview").Produces(202).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409).ProducesProblem(503);
 
         var publicInterviews = app.MapGroup("/api/public/interviews").WithTags("Public ElevenLabs interviews").RequireRateLimiting("public-interview");
         publicInterviews.MapGet("/{invitationToken}", async (string invitationToken, ElevenLabsInterviewService service, CancellationToken ct) =>
@@ -205,7 +236,7 @@ public static class Endpoints
         publicInterviews.MapPost("/{invitationToken}/authorize", async (string invitationToken, ElevenLabsInterviewService service, AnonymousInterviewTokenService tokens, CancellationToken ct) =>
         {
             var access = await service.AuthorizeInvitation(invitationToken, ct);
-            return Results.Ok(tokens.Issue(access.InterviewId, access.InvitationId, access.ExpiresAt));
+            return Results.Ok(tokens.Issue(access.InterviewId, access.InvitationId, access.VisitId, access.ExpiresAt));
         }).Produces<AnonymousInterviewTokenResponse>().ProducesProblem(404).ProducesProblem(409).ProducesProblem(429);
         publicInterviews.MapPost("/{invitationToken}/sessions", async (string invitationToken, CreateAgentSessionRequest request, ElevenLabsInterviewService service, CancellationToken ct) =>
             Results.Ok(await service.CreatePublicSession(invitationToken, request.Mode, ct)))
@@ -220,7 +251,9 @@ public static class Endpoints
             if (!verifier.IsValid(rawBody, request.Headers["ElevenLabs-Signature"].ToString(), clock.UtcNow))
                 return Results.Problem(statusCode: 401, title: "webhook.invalid_signature", extensions: new Dictionary<string, object?> { ["code"] = "webhook.invalid_signature" });
             using var payload = JsonDocument.Parse(rawBody);
-            await service.ProcessWebhook(payload.RootElement, ElevenLabsInterviewService.PayloadHash(rawBody), options.Value.AgentId, ct);
+            try { await service.ProcessWebhook(payload.RootElement, ElevenLabsInterviewService.PayloadHash(rawBody), options.Value.AgentId, ct); }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+            { return Results.Ok(new { status = "duplicate" }); }
             return Results.Ok(new { status = "received" });
         }).WithTags("ElevenLabs webhook").WithMetadata(new RequestSizeLimitAttribute(1_048_576))
             .Produces(200).ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
@@ -240,17 +273,68 @@ public static class Endpoints
         }).RequireAuthorization(AuthenticationSchemes.StaffPolicy).Produces(204).ProducesProblem(401);
         auth.MapGet("/me", async (HttpContext ctx, StaffAuthenticationService service, CancellationToken ct) =>
             Results.Ok(await service.Me(StaffUserId(ctx), ct))).RequireAuthorization(AuthenticationSchemes.StaffPolicy).Produces<AuthenticatedUserView>().ProducesProblem(401);
+
+        var staff = app.MapGroup("/api/v1/staff").WithTags("Staff administration").RequireAuthorization(AuthenticationSchemes.StaffPolicy);
+        staff.MapGet("", async (HttpContext ctx, StaffAdministrationService service, CancellationToken ct) =>
+        {
+            var facility = Facility(ctx, FacilityRole.Administrative);
+            return Results.Ok(await service.List(facility.FacilityId, ct));
+        }).Produces<IReadOnlyList<AuthenticatedUserView>>().ProducesProblem(401).ProducesProblem(403);
+        staff.MapPost("", async (CreateStaffRequest request, HttpContext ctx, StaffAdministrationService service, CancellationToken ct) =>
+        {
+            var facility = Facility(ctx, FacilityRole.Administrative);
+            return Results.Created("/api/v1/staff", await service.Create(facility.FacilityId, request, ct));
+        }).Produces<AuthenticatedUserView>(201).ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(409);
+        staff.MapPut("/{id:guid}", async (Guid id, UpdateStaffRequest request, HttpContext ctx, StaffAdministrationService service, CancellationToken ct) =>
+        {
+            var facility = Facility(ctx, FacilityRole.Administrative);
+            return Results.Ok(await service.Update(facility.FacilityId, id, request, ct));
+        }).Produces<AuthenticatedUserView>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
+    }
+
+    private static void MapPatientAccounts(IEndpointRouteBuilder app)
+    {
+        var auth = app.MapGroup("/api/v1/patient-account/auth").WithTags("Patient account");
+        auth.MapPost("/register", async (PatientRegisterRequest request, HttpContext ctx, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.Register(PatientVisit(ctx), request, ct)))
+            .RequireAuthorization(AuthenticationSchemes.InterviewPolicy).RequireRateLimiting("authentication")
+            .Produces<PatientAccountTokenResponse>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(409).ProducesProblem(429);
+        auth.MapPost("/login", async (PatientLoginRequest request, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.Login(request, ct))).RequireRateLimiting("authentication")
+            .Produces<PatientAccountTokenResponse>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(429);
+        auth.MapPost("/refresh", async (RefreshTokenRequest request, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.Refresh(request, ct))).RequireRateLimiting("authentication")
+            .Produces<PatientAccountTokenResponse>().ProducesProblem(401).ProducesProblem(429);
+
+        var account = app.MapGroup("/api/v1/patient-account").WithTags("Patient account")
+            .RequireAuthorization(AuthenticationSchemes.PatientAccountPolicy);
+        account.MapPost("/logout", async (LogoutRequest request, HttpContext ctx, PatientAccountService service, CancellationToken ct) =>
+        { await service.Logout(AccountId(ctx), request, ct); return Results.NoContent(); }).Produces(204).ProducesProblem(401);
+        account.MapGet("/me", async (HttpContext ctx, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.Me(AccountId(ctx), ct))).Produces<PatientAccountView>().ProducesProblem(401).ProducesProblem(404);
+        account.MapPut("/me", async (PatientProfileUpdateRequest request, HttpContext ctx, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.Update(AccountId(ctx), request, ct))).Produces<PatientAccountView>().ProducesProblem(400).ProducesProblem(401);
+        account.MapGet("/visits", async (HttpContext ctx, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.Visits(AccountId(ctx), ct))).Produces<IReadOnlyList<PatientAccountVisitView>>().ProducesProblem(401);
+        account.MapPost("/visits/{visitId:guid}/session", async (Guid visitId, HttpContext ctx, PatientAccountService service, CancellationToken ct) =>
+            Results.Ok(await service.CreateVisitSession(AccountId(ctx), visitId, ct)))
+            .Produces<ExchangeAccessResult>().ProducesProblem(401).ProducesProblem(404).ProducesProblem(409);
     }
 
     private static Guid PatientVisit(HttpContext ctx) => Guid.Parse(ctx.User.FindFirstValue(DocPrepClaims.VisitId) ?? throw new UnauthorizedError());
     private static Guid StaffUserId(HttpContext ctx) => Guid.Parse(ctx.User.FindFirstValue("sub") ?? throw new UnauthorizedError());
+    private static Guid AccountId(HttpContext ctx) => Guid.Parse(ctx.User.FindFirstValue("sub") ?? throw new UnauthorizedError());
     private static AgentInterviewAccess InterviewAccess(HttpContext ctx)
     {
+        var scope = ctx.User.FindFirstValue(DocPrepClaims.Scope) ?? "";
+        if (Guid.TryParse(ctx.User.FindFirstValue(DocPrepClaims.InterviewId), out var interviewId) &&
+            Guid.TryParse(ctx.User.FindFirstValue(DocPrepClaims.InvitationId), out var invitationId))
+        {
+            if (!scope.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("interview:execute")) throw new ForbiddenError();
+            return AgentInterviewAccess.ForInvitation(interviewId, invitationId);
+        }
         if (Guid.TryParse(ctx.User.FindFirstValue(DocPrepClaims.VisitId), out var visitId)) return AgentInterviewAccess.ForVisit(visitId);
-        if (!string.Equals(ctx.User.FindFirstValue(DocPrepClaims.Scope), "interview:read interview:execute", StringComparison.Ordinal)) throw new ForbiddenError();
-        if (!Guid.TryParse(ctx.User.FindFirstValue(DocPrepClaims.InterviewId), out var interviewId) ||
-            !Guid.TryParse(ctx.User.FindFirstValue(DocPrepClaims.InvitationId), out var invitationId)) throw new ForbiddenError();
-        return AgentInterviewAccess.ForInvitation(interviewId, invitationId);
+        throw new ForbiddenError();
     }
     private static FacilityRequestContext Facility(HttpContext ctx, params FacilityRole[] roles)
     {
@@ -265,6 +349,16 @@ public static class Endpoints
         Required(request.Pesel, nameof(request.Pesel), 20);
         Required(request.Contact, nameof(request.Contact), 320);
         if (request.ScheduledAt == default || request.ServiceExpiresAt == default) throw new ArgumentException("Visit dates are required.");
+        ValidateVisitDetails(request.ScheduledAt, request.ServiceExpiresAt, request.TimeZone, request.VisitType);
+    }
+
+    private static void ValidateVisitDetails(DateTimeOffset scheduledAt, DateTimeOffset serviceExpiresAt, string timeZone, string visitType)
+    {
+        if (scheduledAt == default || serviceExpiresAt == default) throw new ArgumentException("Visit dates are required.");
+        Required(timeZone, nameof(timeZone), 100); Required(visitType, nameof(visitType), 100);
+        try { _ = TimeZoneInfo.FindSystemTimeZoneById(timeZone); }
+        catch (TimeZoneNotFoundException) { throw new ArgumentException("Unknown time zone."); }
+        catch (InvalidTimeZoneException) { throw new ArgumentException("Invalid time zone."); }
     }
 
     private static void ValidateDraft(ReplaceDraftCommand request)
@@ -303,7 +397,14 @@ public sealed record LinkExchangeRequest(string Token);
 public sealed record CodeExchangeRequest(string Code);
 public sealed record NextQuestionResponse(string? NextQuestion);
 public sealed record TranscriptionResponse(string Text);
-public sealed record CreateVisitRequest(string ExternalVisitId, string Pesel, DateTimeOffset ScheduledAt, DateTimeOffset ServiceExpiresAt, string Contact, Domain.Visits.ContactChannel Channel, string? AssignedClinicianId);
+public sealed record CreateVisitRequest(string ExternalVisitId, string Pesel, DateTimeOffset ScheduledAt,
+    DateTimeOffset ServiceExpiresAt, string Contact, Domain.Visits.ContactChannel Channel,
+    string? AssignedClinicianId, string TimeZone = "Europe/Warsaw", string? DoctorName = null,
+    string? DoctorSpecialty = null, string? FacilityName = null, string? FacilityAddress = null,
+    string? Room = null, string VisitType = "InPerson", string? LocationInstructions = null);
+public sealed record UpdateVisitRequest(DateTimeOffset ScheduledAt, DateTimeOffset ServiceExpiresAt,
+    string TimeZone, string? AssignedClinicianId, string? DoctorName, string? DoctorSpecialty,
+    string? FacilityName, string? FacilityAddress, string? Room, string VisitType, string? LocationInstructions);
 public sealed record InvitationRequest(string Contact);
 public sealed record DeletionRequestContract(string Pesel, string VerificationReference);
 public sealed record DeletionRequestResponse(Guid RequestId);

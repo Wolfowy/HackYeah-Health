@@ -13,6 +13,7 @@ namespace DocPrep.Infrastructure.Persistence;
 internal sealed class DocPrepStore(DocPrepDbContext db) : IDocPrepStore
 {
     public Task<PatientIdentity?> FindPatient(string correlationKey, CancellationToken ct) => db.Patients.SingleOrDefaultAsync(x => x.CorrelationKey == correlationKey, ct);
+    public Task<VisitProcess?> FindVisit(Guid facilityId, string externalVisitId, CancellationToken ct) => db.Visits.SingleOrDefaultAsync(x => x.FacilityId == facilityId && x.ExternalVisitId == externalVisitId, ct);
     public Task<VisitProcess?> GetVisit(Guid id, CancellationToken ct) => db.Visits.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<InterviewDraft?> GetDraft(Guid visitId, CancellationToken ct) => db.Drafts.Include(x => x.Answers).Include(x => x.Symptoms).ThenInclude(x => x.Timeline)
         .Include(x => x.Medications).Include(x => x.Allergies).Include(x => x.ChronicConditions).Include(x => x.PatientQuestions).Include(x => x.Clarifications).AsSplitQuery().SingleOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
@@ -31,8 +32,12 @@ internal sealed class DocPrepStore(DocPrepDbContext db) : IDocPrepStore
     public Task<DeliveryAttempt?> GetLatestDelivery(Guid visitId, CancellationToken ct) => db.DeliveryAttempts.OrderByDescending(x => x.AttemptedAt).FirstOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
     public Task<Domain.Privacy.DeletionRequest?> GetDeletionRequest(Guid id, CancellationToken ct) => db.DeletionRequests.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<AgentInterview?> GetAgentInterview(Guid id, CancellationToken ct) => db.AgentInterviews.SingleOrDefaultAsync(x => x.Id == id, ct);
-    public Task<AgentInterview?> GetAgentInterviewByVisit(Guid visitId, CancellationToken ct) => db.AgentInterviews.SingleOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
+    public Task<AgentInterview?> GetAgentInterviewByVisit(Guid visitId, CancellationToken ct) => db.AgentInterviews.OrderByDescending(x => x.Generation).FirstOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
+    public async Task<IReadOnlyList<AgentInterview>> GetAgentInterviewsByVisit(Guid visitId, CancellationToken ct) =>
+        await db.AgentInterviews.Where(x => x.VisitProcessId == visitId).OrderBy(x => x.Generation).ToListAsync(ct);
+    public Task<int> CountAgentInterviews(Guid visitId, CancellationToken ct) => db.AgentInterviews.CountAsync(x => x.VisitProcessId == visitId, ct);
     public Task<AgentInterviewSession?> GetAgentInterviewSession(Guid id, CancellationToken ct) => db.AgentInterviewSessions.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public async Task<IReadOnlyList<AgentInterviewSession>> GetAgentInterviewSessions(Guid interviewId, CancellationToken ct) => await db.AgentInterviewSessions.Where(x => x.InterviewId == interviewId).OrderBy(x => x.CreatedAt).ToListAsync(ct);
     public Task<int> CountAgentInterviewSessions(Guid interviewId, CancellationToken ct) => db.AgentInterviewSessions.CountAsync(x => x.InterviewId == interviewId, ct);
     public Task<bool> HasNewerAgentSession(Guid interviewId, DateTimeOffset createdAt, CancellationToken ct) => db.AgentInterviewSessions.AnyAsync(x => x.InterviewId == interviewId && x.CreatedAt > createdAt, ct);
     public Task<AgentInterviewSession?> GetAgentSessionByConversation(string conversationId, CancellationToken ct) => db.AgentInterviewSessions.SingleOrDefaultAsync(x => x.ProviderConversationId == conversationId, ct);

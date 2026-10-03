@@ -3,6 +3,7 @@ using System;
 using DocPrep.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DocPrep.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(DocPrepDbContext))]
-    partial class DocPrepDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003214242_PatientAccounts")]
+    partial class PatientAccounts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -261,6 +264,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.Allergy", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("InterviewDraftId")
@@ -286,6 +290,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.ChronicCondition", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Description")
@@ -311,6 +316,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.Clarification", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("FieldPath")
@@ -365,12 +371,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("ReceivedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("VisitProcessId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("VisitProcessId");
 
                     b.HasIndex("Provider", "ExternalEventId")
                         .IsUnique();
@@ -381,6 +382,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.InterviewAnswer", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Answer")
@@ -501,6 +503,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.Medication", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Dose")
@@ -536,6 +539,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.PatientQuestion", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("InterviewDraftId")
@@ -558,6 +562,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.Symptom", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("DailyImpact")
@@ -599,6 +604,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("DocPrep.Domain.Interviews.SymptomTimelineEntry", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Description")
@@ -1326,14 +1332,6 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                         .HasForeignKey("InterviewDraftId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("DocPrep.Domain.Interviews.ExternalWebhookEvent", b =>
-                {
-                    b.HasOne("DocPrep.Domain.Visits.VisitProcess", null)
-                        .WithMany()
-                        .HasForeignKey("VisitProcessId")
-                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("DocPrep.Domain.Interviews.InterviewAnswer", b =>

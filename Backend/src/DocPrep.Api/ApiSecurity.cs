@@ -36,8 +36,11 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExce
                 _ => (500, "server.error")
             };
             if (result.Item1 == 500) logger.LogError(ex, "Unhandled request failure");
+            var detail = ex is DbUpdateConcurrencyException concurrency
+                ? $"Concurrency conflict for: {string.Join(", ", concurrency.Entries.Select(x => $"{x.Metadata.ClrType.Name} ({x.State})").Distinct())}."
+                : result.Item1 == 500 ? "An unexpected error occurred." : ex.Message;
             await Results.Problem(statusCode: result.Item1, title: result.Item2,
-                detail: result.Item1 == 500 ? "An unexpected error occurred." : ex.Message,
+                detail: detail,
                 extensions: new Dictionary<string, object?> { ["code"] = result.Item2, ["traceId"] = context.TraceIdentifier }).ExecuteAsync(context);
         }
     }

@@ -19,11 +19,15 @@ builder.Services.AddDocPrepInfrastructure(builder.Configuration);
 builder.Services.AddScoped<PatientAccessService>();
 builder.Services.AddScoped<PatientInterviewService>();
 builder.Services.AddScoped<ElevenLabsInterviewService>();
+builder.Services.AddScoped<InterviewExtractionService>();
 builder.Services.AddScoped<IntegrationService>();
 builder.Services.AddScoped<FacilityReportService>();
 builder.Services.AddScoped<StaffAuthenticationService>();
+builder.Services.AddScoped<StaffAdministrationService>();
+builder.Services.AddScoped<PatientAccountService>();
 builder.Services.AddSingleton<AnonymousInterviewTokenService>();
 builder.Services.AddSingleton<IPasswordHasher<StaffUser>, PasswordHasher<StaffUser>>();
+builder.Services.AddSingleton<IPasswordHasher<PatientAccount>, PasswordHasher<PatientAccount>>();
 builder.Services.Configure<IntegrationOptions>(builder.Configuration.GetSection(IntegrationOptions.Section));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.Section));
 builder.Services.Configure<StaffSeedOptions>(builder.Configuration.GetSection(StaffSeedOptions.Section));
@@ -62,6 +66,17 @@ builder.Services.AddAuthentication()
             ValidateLifetime = true, ClockSkew = TimeSpan.FromSeconds(30)
         };
     })
+    .AddJwtBearer(AuthenticationSchemes.PatientAccountJwt, options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true, ValidIssuer = jwt.Issuer,
+            ValidateAudience = true, ValidAudience = jwt.PatientAudience,
+            ValidateIssuerSigningKey = true, IssuerSigningKey = new SymmetricSecurityKey(signingKey),
+            ValidateLifetime = true, ClockSkew = TimeSpan.FromSeconds(30)
+        };
+    })
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, FacilityApiKeyAuthenticationHandler>(AuthenticationSchemes.FacilityApiKey, _ => { })
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PatientSessionAuthenticationHandler>(AuthenticationSchemes.PatientSession, _ => { })
     .AddPolicyScheme(AuthenticationSchemes.InterviewAccess, null, options => options.ForwardDefaultSelector = context =>
@@ -90,6 +105,11 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(AuthenticationSchemes.InterviewPolicy, policy =>
     {
         policy.AddAuthenticationSchemes(AuthenticationSchemes.InterviewAccess);
+        policy.RequireAuthenticatedUser();
+    });
+    options.AddPolicy(AuthenticationSchemes.PatientAccountPolicy, policy =>
+    {
+        policy.AddAuthenticationSchemes(AuthenticationSchemes.PatientAccountJwt);
         policy.RequireAuthenticatedUser();
     });
 });
@@ -125,6 +145,7 @@ builder.Services.AddSwaggerGen(options =>
     options.AddSecurityDefinition("StaffJwt", new OpenApiSecurityScheme { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", Description = "Token użytkownika panelu zwrócony przez /api/v1/auth/login." });
     options.AddSecurityDefinition("PatientSession", new OpenApiSecurityScheme { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "opaque", Description = "Sesja pacjenta zwrócona po wymianie linku lub kodu." });
     options.AddSecurityDefinition("AnonymousInterviewJwt", new OpenApiSecurityScheme { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", Description = "JWT ograniczony do pojedynczego wywiadu." });
+    options.AddSecurityDefinition("PatientAccountJwt", new OpenApiSecurityScheme { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", Description = "JWT konta pacjenta." });
     options.OperationFilter<SecurityRequirementsOperationFilter>();
 });
 

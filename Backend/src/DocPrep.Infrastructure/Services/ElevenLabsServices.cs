@@ -48,6 +48,15 @@ public sealed class ElevenLabsClient(HttpClient http, IOptions<ElevenLabsOptions
         return new(null, body.SignedUrl, ConversationIdFromUrl(body.SignedUrl));
     }
 
+    public async Task<System.Text.Json.JsonElement> GetConversation(string conversationId, CancellationToken ct)
+    {
+        EnsureConfigured();
+        using var response = await Send($"/v1/convai/conversations/{Uri.EscapeDataString(conversationId)}", ct);
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var document = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        return document.RootElement.Clone();
+    }
+
     private async Task<HttpResponseMessage> Send(string path, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, path);

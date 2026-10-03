@@ -44,13 +44,21 @@ Authorization: Bearer {{staffAccessToken}}
   "serviceExpiresAt": "{{$datetime iso8601 7 d}}",
   "contact": "patient@example.invalid",
   "channel": "Email",
-  "assignedClinicianId": "doctor-demo"
+  "assignedClinicianId": "doctor-demo",
+  "timeZone": "Europe/Warsaw",
+  "doctorName": "dr Anna Kowalska",
+  "doctorSpecialty": "Medycyna rodzinna",
+  "facilityName": "Przychodnia Demo",
+  "facilityAddress": "ul. Zdrowa 1, Warszawa",
+  "room": "12",
+  "visitType": "InPerson",
+  "locationInstructions": "Wejście A, pierwsze piętro"
 }
 
 ### 3. Sprawdź zaproszenie przed rozmową — HTTP 200
 # Oczekiwane: interview.status "pending", sessionCount 0.
 # Potem otwórz link opisany na początku pliku i przeprowadź rozmowę.
-# Po zakończeniu to żądanie zwróci 409 — jest to prawidłowe.
+# Po zakończeniu nadal zwraca 200, aby pacjent mógł wrócić do sprawdzenia raportu.
 GET {{host}}/api/public/interviews/{{invitationToken}}
 
 ### 4. Uzyskaj dostęp do wyniku — HTTP 200, działa także po rozmowie
@@ -69,8 +77,12 @@ Authorization: Bearer {{patientSession}}
 
 ### 6. Sprawdź zapis podsumowania — HTTP 200
 # Po webhooku: status "completed" i niepusty finalReport.
-# structuredDataJson jest stringiem JSON; "{}" oznacza brak wyodrębnionych pól.
+# Sprawdź structuredData, schemaVersion, extractionStatus, importStatus i issues.
 # Jeśli status to "processing", poczekaj i ponów tylko żądania 5–6.
 # Przed rozmową finalReport i structuredDataJson są null.
 GET {{host}}/api/interviews/{{interviewId}}/result
+Authorization: Bearer {{patientSession}}
+
+### 7. Draft znormalizowany z wyniku ElevenLabs — HTTP 200
+GET {{host}}/api/v1/interview
 Authorization: Bearer {{patientSession}}

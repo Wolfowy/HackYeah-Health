@@ -15,7 +15,12 @@ public static class DependencyInjection
         services.AddStackExchangeRedisCache(o => o.Configuration = configuration.GetConnectionString("Redis"));
         services.AddScoped<IDocPrepStore, DocPrepStore>(); services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IPatientDataProtector, PatientDataProtector>(); services.AddSingleton<ICredentialService, CredentialService>();
-        services.AddSingleton<IPatientSessionStore, RedisPatientSessionStore>(); services.AddSingleton<INotificationSender, DemoNotificationSender>();
+        services.AddSingleton<IPatientSessionStore, RedisPatientSessionStore>();
+        services.Configure<NotificationOptions>(configuration.GetSection(NotificationOptions.Section));
+        if (string.IsNullOrWhiteSpace(configuration[$"{NotificationOptions.Section}:ProviderUrl"]))
+            services.AddSingleton<INotificationSender, DemoNotificationSender>();
+        else
+            services.AddHttpClient<INotificationSender, HttpNotificationSender>();
         services.AddSingleton<IInterviewQuestionProvider, AdaptiveQuestionProvider>(); services.AddSingleton<IReportRenderer, QuestReportRenderer>();
         services.AddHttpClient<ITranscriptionService, HttpTranscriptionService>();
         services.Configure<ElevenLabsOptions>(configuration.GetSection(ElevenLabsOptions.Section));

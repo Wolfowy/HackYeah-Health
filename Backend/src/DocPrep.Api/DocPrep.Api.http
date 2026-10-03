@@ -38,7 +38,14 @@ X-Api-Key: {{adminKey}}
   "serviceExpiresAt": "2026-12-11T10:00:00Z",
   "contact": "+48123123123",
   "channel": "Sms",
-  "assignedClinicianId": "doctor-demo"
+  "assignedClinicianId": "doctor-demo",
+  "timeZone": "Europe/Warsaw",
+  "doctorName": "dr Anna Kowalska",
+  "doctorSpecialty": "Medycyna rodzinna",
+  "facilityName": "Przychodnia Demo",
+  "facilityAddress": "ul. Zdrowa 1, Warszawa",
+  "room": "12",
+  "visitType": "InPerson"
 }
 
 ### Dashboard panelu przez JWT (alternatywnie można użyć API key serwer-serwer)

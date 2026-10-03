@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using DocPrep.Application.Abstractions;
 using DocPrep.Application.Contracts;
 using DocPrep.Domain.Interviews;
@@ -13,17 +14,57 @@ namespace DocPrep.Infrastructure.Services;
 
 internal sealed class SystemClock : IClock { public DateTimeOffset UtcNow => DateTimeOffset.UtcNow; }
 
-internal sealed class DemoNotificationSender(ILogger<DemoNotificationSender> logger) : INotificationSender
+internal sealed class DemoNotificationSender(ILogger<DemoNotificationSender> logger, IHostEnvironment environment) : INotificationSender
 {
     public Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode, string interviewInvitationToken, CancellationToken ct)
     {
+        if (!environment.IsDevelopment()) return Task.FromResult(new NotificationResult(false, null, "Notification provider is not configured."));
         logger.LogInformation("Demo {Channel} invitation accepted by notification adapter", channel);
         return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null));
     }
-    public Task<NotificationResult> SendSupplementation(string channel, string destination, CancellationToken ct)
+    public Task<NotificationResult> SendSupplementation(string channel, string destination, string interviewInvitationToken, CancellationToken ct)
     {
+        if (!environment.IsDevelopment()) return Task.FromResult(new NotificationResult(false, null, "Notification provider is not configured."));
         logger.LogInformation("Demo {Channel} supplementation notification accepted by notification adapter", channel);
         return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null));
+    }
+}
+
+public sealed class NotificationOptions
+{
+    public const string Section = "Notifications";
+    public string ProviderUrl { get; init; } = "";
+    public string ApiKey { get; init; } = "";
+    public string FrontendBaseUrl { get; init; } = "http://localhost:5173";
+}
+
+internal sealed class HttpNotificationSender(HttpClient http, Microsoft.Extensions.Options.IOptions<NotificationOptions> options) : INotificationSender
+{
+    private readonly NotificationOptions settings = options.Value;
+    public Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode,
+        string interviewInvitationToken, CancellationToken ct) => SendPayload(new
+        {
+            channel, destination, visitCode,
+            interviewUrl = $"{settings.FrontendBaseUrl.TrimEnd('/')}/i/{Uri.EscapeDataString(interviewInvitationToken)}",
+            accessUrl = $"{settings.FrontendBaseUrl.TrimEnd('/')}/access/{Uri.EscapeDataString(linkToken)}"
+        }, ct);
+
+    public Task<NotificationResult> SendSupplementation(string channel, string destination, string interviewInvitationToken, CancellationToken ct) =>
+        SendPayload(new { channel, destination, kind = "supplementation", returnUrl = $"{settings.FrontendBaseUrl.TrimEnd('/')}/i/{Uri.EscapeDataString(interviewInvitationToken)}" }, ct);
+
+    private async Task<NotificationResult> SendPayload(object payload, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(settings.ProviderUrl)) return new(false, null, "Notification provider is not configured.");
+        using var request = new HttpRequestMessage(HttpMethod.Post, settings.ProviderUrl) { Content = System.Net.Http.Json.JsonContent.Create(payload) };
+        if (!string.IsNullOrWhiteSpace(settings.ApiKey)) request.Headers.TryAddWithoutValidation("X-Api-Key", settings.ApiKey);
+        try
+        {
+            using var response = await http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return new(false, null, $"Provider returned {(int)response.StatusCode}.");
+            var providerId = response.Headers.TryGetValues("X-Message-Id", out var values) ? values.FirstOrDefault() : null;
+            return new(true, providerId, null);
+        }
+        catch (HttpRequestException ex) { return new(false, null, ex.GetType().Name); }
     }
 }
 
@@ -73,11 +114,12 @@ internal sealed class QuestReportRenderer : IReportRenderer
         page.Content().PaddingVertical(8).Column(c =>
         {
             Section(c, "Powód konsultacji", [report.ConsultationReason]);
-            Section(c, "Objawy", report.Symptoms.Select(x => $"{x.Name}: od {x.StartedOn?.ToString() ?? "nieznane"}, częstość {x.Frequency ?? "nieznana"}, nasilenie {x.Severity?.ToString() ?? "nieznane"}/10. {x.DailyImpact} {x.Description}"));
-            Section(c, "Leki", report.Medications.Select(x => $"{x.Name}, dawka: {x.Dose ?? "nieznana"}, schemat: {x.Schedule ?? "nieznany"}"));
+            Section(c, "Objawy", report.Symptoms.Select(x => $"{x.Name}: od {x.StartedOn?.ToString() ?? "nieznane"}, częstość {x.Frequency ?? "nieznana"}, nasilenie {x.Severity?.ToString() ?? "nieznane"}/10. {x.DailyImpact} {x.Description} Chronologia: {string.Join("; ", x.Timeline.Select(t => $"{t.OccurredOn?.ToString() ?? t.Period ?? "czas nieznany"}: {t.Description}"))}"));
+            Section(c, "Leki", report.Medications.Select(x => $"{x.Name}, dawka: {x.Dose ?? "nieznana"}, schemat: {x.Schedule ?? "nieznany"}, powód: {x.Reason ?? "niepodany"}"));
             Section(c, "Alergie", report.Allergies.Select(x => $"{x.Substance}: {x.Reaction ?? "reakcja nieznana"}"));
             Section(c, "Choroby przewlekłe", report.ChronicConditions.Select(x => $"{x.Name}: {x.Description}"));
             Section(c, "Pytania pacjenta", report.PatientQuestions);
+            Section(c, "Dodatkowe uwagi", [report.AdditionalNotes]);
             Section(c, "Braki i sprzeczności", report.Clarifications.Select(x => x.Message));
             Section(c, "Zatwierdzone obserwacje", report.Observations.Select(x => $"{x.SymptomName}: {x.Text}{(x.EditedByPatient ? " [zmiana pacjenta]" : "")}"));
             Section(c, "Odpowiedzi uzupełniające", report.SupplementationAnswers.Select(x => $"{x.Question} — {x.Answer}"));
