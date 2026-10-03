@@ -100,16 +100,8 @@ test('konto demo udostępnia listę wizyt, izoluje raporty i czyści dane po wyl
   await expect(page.getByText('Od kilku dni boli mnie głowa.', { exact: true })).toHaveCount(0)
 })
 
-test('niepełny raport wymaga potwierdzenia, a niewłaściwy kod nie otwiera wizyty', async ({
-  page,
-}) => {
+test('niepełny raport wymaga potwierdzenia', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Mam kod innej wizyty' }).click()
-  await page.getByLabel('Kod wizyty', { exact: true }).fill('WRONG')
-  await page.getByRole('button', { name: 'Otwórz wywiad', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('Nieprawidłowy kod')
-  await page.getByLabel('Kod wizyty', { exact: true }).fill('DEMO2026')
-  await page.getByRole('button', { name: 'Otwórz wywiad', exact: true }).click()
   await page.getByRole('button', { name: 'Czat', exact: true }).click()
   await page.getByRole('button', { name: 'Od kilku dni boli mnie głowa.', exact: true }).click()
   await navigate(page, 'Podsumowanie')
@@ -117,6 +109,79 @@ test('niepełny raport wymaga potwierdzenia, a niewłaściwy kod nie otwiera wiz
   await page.getByRole('checkbox', { name: 'Rozumiem, że raport jest niepełny' }).check()
   await page.getByRole('button', { name: 'Zatwierdź treść raportu' }).click()
   await expect(page.getByRole('button', { name: 'Udostępnij placówce' })).toBeVisible()
+})
+
+test('link demo otwiera samą rozmowę, bez bocznego menu i dodatkowych kart', async ({ page }) => {
+  await page.goto('/i/demo-appointment-1')
+  await expect(page.getByRole('navigation')).toHaveCount(0)
+  await expect(page.locator('.sidebar, .visit-context')).toHaveCount(0)
+  await expect(page.locator('.orb-waves')).toBeVisible()
+  await expect(page.locator('.orb-waves path')).toHaveCount(5)
+  await expect(page.locator('.orb-waves')).toHaveAttribute('fill', 'none')
+  await expect(page.getByText('Asystent zbiera informacje dla lekarza')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Czat', exact: true }).click()
+  await page.getByRole('button', { name: 'Od kilku dni boli mnie głowa.', exact: true }).click()
+  await expect(
+    page.getByRole('log').getByText('Od kilku dni boli mnie głowa.', { exact: true }),
+  ).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('button', { name: 'Rozmowa głosowa' }).click()
+  await page.screenshot({
+    path: `test-results/standalone-${test.info().project.name}.png`,
+    fullPage: true,
+  })
+})
+
+test('wygasły link blokuje uruchomienie agenta', async ({ page }) => {
+  let sessionRequests = 0
+  await page.route('**/api/**', async (route) => {
+    if (route.request().url().includes('/sessions')) sessionRequests++
+    await route.fulfill({ status: 410, json: {} })
+  })
+  await page.goto('/i/expired-token')
+  await expect(page.getByRole('alert')).toContainText('Ten link wygasł')
+  await expect(page.getByRole('button', { name: 'Rozpocznij rozmowę', exact: true })).toHaveCount(0)
+  expect(sessionRequests).toBe(0)
+})
+
+test('prawdziwy link wymienia token i pokazuje błąd backendu bez żądania mikrofonu w czacie', async ({
+  page,
+}) => {
+  const calls: { path: string; body: string | null; authorization?: string }[] = []
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      value: () => {
+        throw new Error('Test: mikrofon nie powinien być otwierany')
+      },
+    })
+  })
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    calls.push({ path, body: request.postData(), authorization: request.headers().authorization })
+    if (path.endsWith('/authorize'))
+      await route.fulfill({ json: { accessToken: 'scoped-test-token', expiresIn: 3600 } })
+    else if (path.endsWith('/sessions')) await route.fulfill({ status: 503, json: {} })
+    else
+      await route.fulfill({
+        json: {
+          interview: {
+            displayName: 'Wywiad przed wizytą',
+            visitDate: '2026-12-10T10:00:00Z',
+            status: 'pending',
+          },
+        },
+      })
+  })
+  await page.goto('/i/test-invitation-token')
+  await expect(page).toHaveURL(/\/rozmowa$/)
+  await expect(page.getByRole('navigation')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Czat', exact: true }).click()
+  await page.getByRole('button', { name: 'Rozpocznij czat', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Rozmowa jest chwilowo niedostępna')
+  const session = calls.find((call) => call.path === '/api/interview/sessions')
+  expect(session?.authorization).toBe('Bearer scoped-test-token')
+  expect(JSON.parse(session!.body!)).toEqual({ mode: 'text' })
 })
 
 test('interfejs mieści się w szerokości ekranu', async ({ page }) => {

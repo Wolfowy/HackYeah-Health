@@ -13,6 +13,7 @@ RUN dotnet publish src/HealthPrep.Api/HealthPrep.Api.csproj -c Release -o /app -
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app .
+RUN mkdir -p /app/access-keys && chown "$APP_UID" /app/access-keys && chmod 700 /app/access-keys
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 USER $APP_UID

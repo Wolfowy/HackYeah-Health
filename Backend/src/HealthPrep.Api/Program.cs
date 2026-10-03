@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using HealthPrep.Api;
+using HealthPrep.Api.Agents;
 using HealthPrep.Application.Appointments;
 using HealthPrep.Infrastructure;
 using HealthPrep.Infrastructure.Persistence;
@@ -8,6 +9,7 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddAgentInterviews(builder.Configuration);
 builder.Services.AddScoped<InterviewService>();
 builder.Services.AddProblemDetails();
 builder.Services.ConfigureHttpJsonOptions(x => x.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -15,7 +17,7 @@ builder.Services.Configure<IntegrationOptions>(builder.Configuration.GetSection(
 builder.Services.AddScoped<FacilityApiKeyFilter>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
-    .AllowAnyHeader().AllowAnyMethod()));
+    .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -28,9 +30,11 @@ var app = builder.Build();
 app.UseExceptionHandler();
 app.UseMiddleware<ApiExceptionMiddleware>();
 app.UseCors();
+app.UseRateLimiter();
 app.UseSwagger();
 app.UseSwaggerUI();
 app.MapHealthPrepEndpoints();
+app.MapAgentInterviews();
 
 if (app.Configuration.GetValue("Database:Initialize", true))
 {

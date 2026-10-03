@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\HealthPrep.Domain\HealthPrep.Domain.csproj" />
     <ProjectReference Include="..\..\src\HealthPrep.Application\HealthPrep.Application.csproj" />
     <ProjectReference Include="..\..\src\HealthPrep.Infrastructure\HealthPrep.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\HealthPrep.Api\HealthPrep.Api.csproj" />
   </ItemGroup>
 
 </Project>

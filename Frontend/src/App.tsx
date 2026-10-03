@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight,
   CalendarDays,
   Check,
   ChevronDown,
-  ChevronRight,
   FileText,
-  Heart,
-  LockKeyhole,
   LogIn,
   LogOut,
   Menu,
   MessageCircle,
-  ShieldCheck,
   UserRound,
   X,
 } from 'lucide-react'
@@ -27,6 +22,8 @@ import { Appointments, AppointmentDetails } from './components/Appointments'
 import { Login } from './components/Login'
 import { Profile } from './components/Profile'
 import { Modal } from './components/Modal'
+import { StandaloneConversation } from './components/StandaloneConversation'
+import { standaloneRoute } from './lib/routes'
 
 const paths: Record<Page, string> = {
   interview: 'wywiad',
@@ -45,6 +42,13 @@ function initialInterviews() {
 }
 
 export default function App() {
+  const [directRoute] = useState(() =>
+    standaloneRoute(window.location.pathname, window.location.hash),
+  )
+  return directRoute ? <StandaloneConversation route={directRoute} /> : <WorkspaceApp />
+}
+
+function WorkspaceApp() {
   const [session, setSession] = useState<Session>({
     mode: 'guest',
     appointmentId: appointments[0].id,
@@ -55,10 +59,6 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [toast, setToast] = useState('')
-  const [info, setInfo] = useState(false)
-  const [codeModal, setCodeModal] = useState(false)
-  const [code, setCode] = useState('')
-  const [codeError, setCodeError] = useState('')
   const [resetModal, setResetModal] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const authenticated = session.mode === 'authenticated'
@@ -201,7 +201,6 @@ export default function App() {
         >
           <X size={20} />
         </button>
-        <div className="sidebar-label">TWOJA PRZESTRZEŃ</div>
         <nav aria-label="Nawigacja główna">
           {navItems.map(({ page: itemPage, label, icon: Icon }) => (
             <a
@@ -217,23 +216,6 @@ export default function App() {
             </a>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="sidebar-quote">
-            <span className="quote-icon">
-              <Heart size={17} />
-            </span>
-            <p>
-              Dobra wizyta zaczyna się
-              <br />
-              od dobrej rozmowy.
-            </p>
-            <span>Jesteśmy tu dla Ciebie.</span>
-          </div>
-          <button className="sidebar-help" onClick={() => setInfo(true)}>
-            <ShieldCheck size={18} />O aplikacji <ChevronRight size={14} />
-          </button>
-          <div className="sidebar-copyright">PRZED WIZYTĄ © 2026</div>
-        </div>
       </aside>
       <div className="main-shell">
         <header className="topbar">
@@ -245,18 +227,6 @@ export default function App() {
             >
               <Menu size={21} />
             </button>
-            <span className="breadcrumb">
-              Twoja przestrzeń <ChevronRight size={13} />
-              <strong>
-                {page === 'interview'
-                  ? 'Wywiad'
-                  : page === 'summary'
-                    ? 'Podsumowanie'
-                    : page === 'profile'
-                      ? 'Konto'
-                      : 'Wizyty'}
-              </strong>
-            </span>
             <a className="mobile-brand" href="#/wywiad">
               <span className="brand-ring" />
               Przed wizytą<span className="brand-dot">.</span>
@@ -308,10 +278,6 @@ export default function App() {
               </div>
             ) : (
               <>
-                <span className="guest-label">
-                  <LockKeyhole size={13} />
-                  Tryb gościa
-                </span>
                 <button className="button login-button" onClick={() => navigate('login')}>
                   <LogIn size={15} />
                   Zaloguj się
@@ -323,22 +289,9 @@ export default function App() {
         <main className={`main-content page-${page}`} id="main-content" tabIndex={-1}>
           <div className="page-heading">
             <div>
-              <span className="eyebrow">
-                {page === 'interview'
-                  ? 'PRZESTRZEŃ NA TWOJĄ HISTORIĘ'
-                  : page === 'summary'
-                    ? 'TWÓJ RAPORT, TWOJA DECYZJA'
-                    : 'DOBRA WIZYTA ZACZYNA SIĘ WCZEŚNIEJ'}
-              </span>
               <h1>{titles[page].title}</h1>
               <p>{titles[page].subtitle}</p>
             </div>
-            {page === 'interview' && (
-              <span className="time-estimate">
-                <span className="tiny-clock" />
-                około 5–7 min
-              </span>
-            )}
           </div>
           {page === 'interview' && (
             <div className="interview-layout">
@@ -352,10 +305,8 @@ export default function App() {
               <VisitContext
                 appointment={appointment}
                 interview={interview}
-                authenticated={authenticated}
                 onAppointment={() => navigate('appointment')}
                 onSummary={() => navigate('summary')}
-                onLogin={() => navigate('login')}
               />
             </div>
           )}
@@ -391,25 +342,6 @@ export default function App() {
           {page === 'profile' && session.mode === 'authenticated' && (
             <Profile patient={session.patient} onSave={savePatient} onLogout={logout} />
           )}
-          <footer className="page-footer">
-            <span>
-              <ShieldCheck size={13} />
-              Asystent zbiera informacje dla lekarza.
-            </span>
-            {!authenticated && (
-              <button
-                className="text-button muted"
-                onClick={() => {
-                  setCodeModal(true)
-                  setCodeError('')
-                  setCode('')
-                }}
-              >
-                Mam kod innej wizyty <ArrowRight size={13} />
-              </button>
-            )}
-            <span className="footer-tagline">Mały krok do spokojniejszej wizyty.</span>
-          </footer>
         </main>
       </div>
       {toast && (
@@ -426,71 +358,6 @@ export default function App() {
             <X size={15} />
           </button>
         </div>
-      )}
-      {info && (
-        <Modal title="Poznaj Przed wizytą" onClose={() => setInfo(false)}>
-          <p className="modal-description">
-            To przestrzeń do przygotowania informacji przed spotkaniem z lekarzem. Asystent zbiera
-            powód wizyty, objawy, leki, alergie i Twoje pytania, a Ty sprawdzasz raport oraz
-            decydujesz o jego udostępnieniu.
-          </p>
-          <div className="notice">
-            <ShieldCheck size={18} />
-            <span>Asystent nie diagnozuje i nie zaleca leczenia.</span>
-          </div>
-          <p className="form-hint">
-            To frontend demonstracyjny bez połączenia z backendem. Konto, pytania AI i udostępnianie
-            są symulowane. Odpowiedzi są przechowywane wyłącznie w pamięci strony; odświeżenie je
-            usuwa.
-          </p>
-          <button className="button primary full-width" onClick={() => setInfo(false)}>
-            Rozumiem <Check size={16} />
-          </button>
-        </Modal>
-      )}
-      {codeModal && (
-        <Modal title="Otwórz wywiad kodem wizyty" onClose={() => setCodeModal(false)}>
-          <p className="modal-description">
-            Wpisz kod otrzymany od placówki. W demo możesz użyć kodu <strong>DEMO2026</strong>.
-          </p>
-          <form
-            onSubmit={async (event) => {
-              event.preventDefault()
-              const visit = await mockPatientService.getGuestAppointment(code)
-              if (!visit) {
-                setCodeError('Nieprawidłowy kod. W demo użyj DEMO2026.')
-                return
-              }
-              setSelectedId(visit.id)
-              setSession({ mode: 'guest', appointmentId: visit.id })
-              setCodeModal(false)
-              navigate('interview')
-              notify('Otwarto demonstracyjny wywiad dla Twojej wizyty.')
-            }}
-          >
-            <label className="form-label" htmlFor="visit-code">
-              Kod wizyty
-            </label>
-            <input
-              id="visit-code"
-              className="form-input code-input"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="np. DEMO2026"
-              autoFocus
-              required
-              maxLength={40}
-            />
-            {codeError && (
-              <p className="form-error" role="alert">
-                {codeError}
-              </p>
-            )}
-            <button className="button primary full-width">
-              Otwórz wywiad <ArrowRight size={16} />
-            </button>
-          </form>
-        </Modal>
       )}
       {resetModal && (
         <Modal title="Rozpocznij nowy wywiad demo" onClose={() => setResetModal(false)}>

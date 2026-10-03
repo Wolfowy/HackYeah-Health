@@ -1,14 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Mail,
-  ShieldCheck,
-} from 'lucide-react'
+import { ArrowLeft, ArrowRight, Eye, EyeOff, KeyRound, Mail, ShieldCheck } from 'lucide-react'
 import { demoPatient } from '../data/mock'
 import { Orb } from './Orb'
 
@@ -53,7 +44,6 @@ export function Login({
       </button>
       <div className="login-layout">
         <section className="login-story">
-          <span className="eyebrow">DOBRA WIZYTA ZACZYNA SIĘ WCZEŚNIEJ</span>
           <h1>
             Więcej spokoju.
             <br />
@@ -66,23 +56,8 @@ export function Login({
             <br className="desktop-only" /> przygotujemy się razem.
           </p>
           <Orb />
-          <div className="login-benefits">
-            <span>
-              <Check size={16} />
-              Twoje nadchodzące wizyty
-            </span>
-            <span>
-              <Check size={16} />
-              Raport, który możesz uzupełniać
-            </span>
-            <span>
-              <Check size={16} />
-              Pełna kontrola nad udostępnianiem
-            </span>
-          </div>
         </section>
         <section className="login-form-card card">
-          <span className="pill lavender">Konto pacjenta · demo</span>
           <h2>Dobrze Cię widzieć.</h2>
           <p>Zaloguj się i przygotuj swoją kolejną wizytę.</p>
           <form onSubmit={submit}>
@@ -163,7 +138,6 @@ export function Login({
           </button>
         </section>
       </div>
-      <footer className="login-footer">Przed wizytą · Miejsce na Twoją historię.</footer>
     </main>
   )
 }

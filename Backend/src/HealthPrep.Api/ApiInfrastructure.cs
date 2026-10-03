@@ -3,6 +3,7 @@ using System.Text;
 using HealthPrep.Application.Appointments;
 using HealthPrep.Domain.Appointments;
 using Microsoft.Extensions.Options;
+using HealthPrep.Api.Agents;
 
 namespace HealthPrep.Api;
 
@@ -32,9 +33,9 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next)
     public async Task Invoke(HttpContext context)
     {
         try { await next(context); }
-        catch (Exception ex) when (ex is DomainException or NotFoundException or ForbiddenException)
+        catch (Exception ex) when (ex is DomainException or NotFoundException or ForbiddenException or AgentApiException)
         {
-            var status = ex switch { NotFoundException => 404, ForbiddenException => 403, _ => 400 };
+            var status = ex switch { AgentApiException agent => agent.Status, NotFoundException => 404, ForbiddenException => 403, _ => 400 };
             await Results.Problem(statusCode: status, title: ex.GetType().Name.Replace("Exception", ""), detail: ex.Message).ExecuteAsync(context);
         }
     }

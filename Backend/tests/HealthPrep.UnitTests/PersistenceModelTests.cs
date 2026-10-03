@@ -1,4 +1,5 @@
 using HealthPrep.Domain.Appointments;
+using HealthPrep.Domain.Agents;
 using HealthPrep.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,5 +18,8 @@ public sealed class PersistenceModelTests
         Assert.NotNull(appointment);
         Assert.Equal(7, appointment!.GetNavigations().Count());
         Assert.Equal("jsonb", db.Model.FindEntityType(typeof(SummaryVersion))!.FindProperty(nameof(SummaryVersion.SnapshotJson))!.GetColumnType());
+        Assert.Equal("jsonb", db.Model.FindEntityType(typeof(AgentSession))!.FindProperty(nameof(AgentSession.TranscriptJson))!.GetColumnType());
+        Assert.True(db.Model.FindEntityType(typeof(AgentSession))!.GetIndexes().Single(x => x.Properties.Any(p => p.Name == nameof(AgentSession.ProviderConversationId))).IsUnique);
+        Assert.True(db.Model.FindEntityType(typeof(AgentInterview))!.GetIndexes().Single(x => x.Properties.Any(p => p.Name == nameof(AgentInterview.AppointmentId))).IsUnique);
     }
 }

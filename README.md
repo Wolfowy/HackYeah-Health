@@ -4,4 +4,6 @@ Backend wspierający pacjenta w przygotowaniu uporządkowanego, zatwierdzonego r
 
 Implementacja backendu i instrukcja uruchomienia znajdują się w [`Backend/README.md`](Backend/README.md).
 
-Frontend aplikacji **Przed wizytą** (React + TypeScript, działające demo bez backendu) i instrukcja uruchomienia znajdują się w [`Frontend/README.md`](Frontend/README.md).
+Frontend aplikacji **Przed wizytą** (React + TypeScript, demo i integracja z ElevenLabs) oraz instrukcja uruchomienia znajdują się w [`Frontend/README.md`](Frontend/README.md). Samą rozmowę bez panelu konta można zobaczyć pod `/i/demo-appointment-1`; docelowe zaproszenia mają postać `/i/{token}`.
+
+Opis ekranów, przepływów, modeli danych i organizacji kodu frontendu: [`docs/przed-wizyta-frontend.md`](docs/przed-wizyta-frontend.md).

@@ -4,10 +4,7 @@ import {
   Check,
   ChevronRight,
   FileText,
-  LockKeyhole,
   MessageCircle,
-  ShieldCheck,
-  Sparkles,
 } from 'lucide-react'
 import type { Appointment, Interview } from '../models'
 import { appointmentDay, appointmentTime } from '../lib/format'
@@ -16,17 +13,13 @@ import { interviewQuestions } from '../data/mock'
 export function VisitContext({
   appointment,
   interview,
-  authenticated,
   onAppointment,
   onSummary,
-  onLogin,
 }: {
   appointment: Appointment
   interview: Interview
-  authenticated: boolean
   onAppointment: () => void
   onSummary: () => void
-  onLogin: () => void
 }) {
   const completed = Math.min(interview.questionIndex, interviewQuestions.length)
   const percent = Math.round((completed / interviewQuestions.length) * 100)
@@ -122,32 +115,6 @@ export function VisitContext({
           <ChevronRight size={16} />
         </button>
       </section>
-      <div className="privacy-note">
-        <ShieldCheck size={19} />
-        <div>
-          <strong>Ty decydujesz, co udostępnisz</strong>
-          <p>Lekarz zobaczy raport dopiero po zatwierdzeniu treści i Twojej zgodzie.</p>
-        </div>
-      </div>
-      {!authenticated && (
-        <div className="account-nudge">
-          <span className="small-icon">
-            <Sparkles size={17} />
-          </span>
-          <h3>
-            Wszystko przed wizytą.
-            <br />W jednym miejscu.
-          </h3>
-          <p>Z kontem sprawdzisz swoje wizyty i dodasz informacje do raportu.</p>
-          <button className="text-button" onClick={onLogin}>
-            Poznaj tryb z kontem <ArrowRight size={15} />
-          </button>
-          <span className="nudge-footnote">
-            <LockKeyhole size={11} />
-            Ta rozmowa nie wymaga logowania
-          </span>
-        </div>
-      )}
     </aside>
   )
 }

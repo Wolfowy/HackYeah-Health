@@ -7,6 +7,12 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=healthprep;Username=healthprep;Password=${POSTGRES_PASSWORD:-healthprep_dev}
       ConnectionStrings__Redis: redis:6379
+      ElevenLabs__ApiKey: ${ELEVENLABS_API_KEY:-}
+      ElevenLabs__AgentId: ${ELEVENLABS_AGENT_ID:-}
+      ElevenLabs__WebhookSecret: ${ELEVENLABS_WEBHOOK_SECRET:-}
+      InterviewAccess__KeyDirectory: /app/access-keys
+    volumes:
+      - access_keys:/app/access-keys
     ports:
       - "8080:8080"
     depends_on:
@@ -48,3 +54,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  access_keys:

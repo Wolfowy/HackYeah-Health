@@ -1,5 +1,6 @@
 using HealthPrep.Domain.Appointments;
 using HealthPrep.Domain.Tenancy;
+using HealthPrep.Domain.Agents;
 using Microsoft.EntityFrameworkCore;
 
 namespace HealthPrep.Infrastructure.Persistence;
@@ -8,6 +9,9 @@ public sealed class HealthPrepDbContext(DbContextOptions<HealthPrepDbContext> op
 {
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<Facility> Facilities => Set<Facility>();
+    public DbSet<AgentInterview> AgentInterviews => Set<AgentInterview>();
+    public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
+    public DbSet<InterviewInvitation> InterviewInvitations => Set<InterviewInvitation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +39,32 @@ public sealed class HealthPrepDbContext(DbContextOptions<HealthPrepDbContext> op
         modelBuilder.Entity<TrendObservation>().Property(x => x.EvidenceJson).HasColumnType("jsonb");
         modelBuilder.Entity<Facility>().HasKey(x => x.Id);
         modelBuilder.Entity<Facility>().HasIndex(x => x.ApiKeyHash).IsUnique();
+
+        var interview = modelBuilder.Entity<AgentInterview>();
+        interview.ToTable("agent_interviews");
+        interview.HasKey(x => x.Id);
+        interview.HasIndex(x => x.AppointmentId).IsUnique();
+        interview.HasOne<Appointment>().WithMany().HasForeignKey(x => x.AppointmentId).OnDelete(DeleteBehavior.Cascade);
+        interview.Property(x => x.StructuredDataJson).HasColumnType("jsonb");
+
+        var invitation = modelBuilder.Entity<InterviewInvitation>();
+        invitation.ToTable("interview_invitations");
+        invitation.HasKey(x => x.Id);
+        invitation.HasIndex(x => x.TokenHash).IsUnique();
+        invitation.Property(x => x.TokenHash).HasMaxLength(64);
+        invitation.HasOne<AgentInterview>().WithMany().HasForeignKey(x => x.InterviewId).OnDelete(DeleteBehavior.Cascade);
+
+        var session = modelBuilder.Entity<AgentSession>();
+        session.ToTable("agent_sessions");
+        session.HasKey(x => x.Id);
+        session.HasIndex(x => x.ProviderConversationId).IsUnique();
+        session.HasOne<AgentInterview>().WithMany().HasForeignKey(x => x.InterviewId).OnDelete(DeleteBehavior.Cascade);
+        session.HasOne<InterviewInvitation>().WithMany().HasForeignKey(x => x.InvitationId).OnDelete(DeleteBehavior.SetNull);
+        session.Ignore(x => x.TechnicalUserId);
+        session.Property(x => x.TranscriptJson).HasColumnType("jsonb");
+        session.Property(x => x.AnalysisJson).HasColumnType("jsonb");
+        session.Property(x => x.MetadataJson).HasColumnType("jsonb");
+        session.Property(x => x.StructuredDataJson).HasColumnType("jsonb");
     }
 
     private static void ConfigureChild<T>(ModelBuilder modelBuilder, string table) where T : class

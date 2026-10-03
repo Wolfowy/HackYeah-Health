@@ -5,15 +5,12 @@ import {
   AudioLines,
   Check,
   ChevronRight,
-  CircleHelp,
-  CornerDownLeft,
   Keyboard,
   MessageCircle,
   Mic,
   Pause,
   Play,
   RotateCcw,
-  Sparkles,
   Volume2,
   VolumeX,
 } from 'lucide-react'
@@ -37,7 +34,6 @@ export function Conversation({
   const [input, setInput] = useState('')
   const [transcript, setTranscript] = useState('')
   const [sound, setSound] = useState(false)
-  const [help, setHelp] = useState(false)
   const chatEnd = useRef<HTMLDivElement>(null)
   const voiceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voiceRun = useRef(0)
@@ -190,16 +186,6 @@ export function Conversation({
         </div>
       ) : mode === 'voice' ? (
         <div className="voice-experience">
-          <div className="voice-status">
-            <span className={`status-dot ${voiceState !== 'paused' ? 'live' : ''}`} />
-            {voiceState === 'idle'
-              ? 'Twój asystent jest gotowy'
-              : voiceState === 'speaking'
-                ? 'Asystent zadaje pytanie'
-                : voiceState === 'paused'
-                  ? 'Rozmowa wstrzymana'
-                  : 'Teraz Twoja kolej'}
-          </div>
           <Orb state={voiceState} />
           <div className="voice-copy" aria-live="polite">
             <h2>
@@ -212,11 +198,6 @@ export function Conversation({
                     : 'Słucham Cię…'}
             </h2>
             <p className="current-question">{question.text}</p>
-            <p className="voice-hint">
-              {voiceState === 'paused'
-                ? 'Wróć do rozmowy, kiedy będziesz gotowy.'
-                : 'Nie ma złych odpowiedzi. Możesz zrobić przerwę.'}
-            </p>
           </div>
           <div className="voice-controls">
             <button
@@ -299,10 +280,6 @@ export function Conversation({
             aria-label="Historia rozmowy"
             aria-live="polite"
           >
-            <div className="chat-greeting">
-              <Sparkles size={15} />
-              Przestrzeń na Twoją historię. Opowiedz tyle, ile chcesz.
-            </div>
             {interview.messages.map((message) => (
               <div className={`chat-message ${message.role}`} key={message.id}>
                 {message.role === 'assistant' && (
@@ -363,31 +340,7 @@ export function Conversation({
                 <ArrowUp size={20} />
               </button>
             </form>
-            <div className="composer-hint">
-              <span>{question.hint}</span>
-              <span>
-                <CornerDownLeft size={11} />
-                wyślij
-              </span>
-            </div>
           </div>
-        </div>
-      )}
-      <div className="conversation-footer">
-        <span>
-          <span className="demo-indicator" />
-          Demo · odpowiedzi AI są symulowane
-        </span>
-        <button onClick={() => setHelp(!help)} className="text-button muted">
-          <CircleHelp size={14} />
-          Jak to działa?
-        </button>
-      </div>
-      {help && (
-        <div className="inline-help">
-          Asystent zbiera informacje do wywiadu. W tym demo pytania są zaprogramowane, a mikrofon
-          nie nagrywa. Opcjonalnie możesz włączyć odczytywanie pytań. Odpowiedzi wpisujesz lub
-          wybierasz z przykładów i zawsze możesz je poprawić w podsumowaniu.
         </div>
       )}
     </section>
