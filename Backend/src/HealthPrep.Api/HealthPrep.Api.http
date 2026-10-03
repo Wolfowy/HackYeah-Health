@@ -1,0 +1,39 @@
+@host = http://localhost:8080
+@facilityKey = demo-clinic-key
+@patientId = patient-001
+
+### Health
+GET {{host}}/health
+
+### Facility creates an appointment
+POST {{host}}/api/v1/integration/appointments
+Content-Type: application/json
+X-Api-Key: {{facilityKey}}
+
+{
+  "externalAppointmentId": "visit-001",
+  "externalPatientId": "{{patientId}}",
+  "scheduledAt": "2026-12-10T10:00:00Z",
+  "consultationReason": "Recurring headache"
+}
+
+### Facility dashboard
+GET {{host}}/api/v1/integration/appointments
+X-Api-Key: {{facilityKey}}
+
+### Patient history
+GET {{host}}/api/v1/patient/appointments
+X-Patient-Id: {{patientId}}
+
+### Replace after creating an appointment
+@appointmentId = 00000000-0000-0000-0000-000000000000
+
+POST {{host}}/api/v1/patient/appointments/{{appointmentId}}/answers
+Content-Type: application/json
+X-Patient-Id: {{patientId}}
+
+{
+  "question": "What is the main reason for your consultation?",
+  "answer": "A headache that returns in the afternoon.",
+  "mode": "Text"
+}

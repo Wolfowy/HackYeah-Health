@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+Backend/.dotnet-cli/
+Backend/TestResults/
+.env
+.idea/
+.vs/
+*.user
