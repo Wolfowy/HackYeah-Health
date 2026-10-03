@@ -60,6 +60,12 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
         var interview = await AuthorizedInterview(interviewId, access, ct);
         interview.EnsureCanStart();
         var visit = await ActiveVisit(interview.VisitProcessId, ct);
+        var previousSessions = await store.GetAgentInterviewSessions(interviewId, ct);
+        var previousInterview = (await store.GetAgentInterviewsByVisit(visit.Id, ct))
+            .Where(x => x.Generation < interview.Generation).OrderByDescending(x => x.Generation).FirstOrDefault();
+        var round = await store.GetOpenRound(visit.Id, ct);
+        var continuation = InterviewContinuationContext.Build(previousSessions, previousInterview?.FinalReport,
+            round?.Questions.Where(x => x.Answer is null).Select(x => x.Text));
         InterviewInvitation? invitation = null;
         if (access.InvitationId is not null)
         {
@@ -81,7 +87,13 @@ public sealed class ElevenLabsInterviewService(IDocPrepStore store, ICredentialS
             interview.Start(clock.UtcNow);
             store.Add(new AuditEvent(visit.FacilityId, visit.Id, participant, $"agent_session.started:{session.Id}:{mode}", clock.UtcNow));
             await store.Save(ct);
-            return new(session.Id, mode.ToString().ToLowerInvariant(), session.Provider, credential.ConversationToken, credential.SignedUrl, credential.ConversationId);
+            return new(session.Id, mode.ToString().ToLowerInvariant(), session.Provider, credential.ConversationToken,
+                credential.SignedUrl, credential.ConversationId, participant, new Dictionary<string, object>
+                {
+                    ["language"] = "pl", ["visit_type"] = "wywiad przed wizytą", ["interview_type"] = interview.InterviewType,
+                    ["is_continuation"] = !string.IsNullOrWhiteSpace(continuation),
+                    ["previous_conversation_summary"] = continuation
+                });
         }
         catch
         {

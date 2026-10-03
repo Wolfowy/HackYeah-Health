@@ -6,6 +6,7 @@ using DocPrep.Domain.Interviews;
 using DocPrep.Domain.Privacy;
 using DocPrep.Domain.Supplementation;
 using DocPrep.Domain.Visits;
+using System.Text.Json;
 
 namespace DocPrep.Application.Visits;
 
@@ -14,38 +15,49 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
 {
     public async Task<InvitationResult> CreateVisit(CreateVisitCommand command, CancellationToken ct)
     {
+        await using var scheduleLock = await store.LockFacilitySchedule(command.FacilityId, ct);
         if (await store.FindVisit(command.FacilityId, command.ExternalVisitId, ct) is not null)
             throw new ConflictError("visit.external_id_conflict", "A visit with this external identifier already exists.");
-        var correlation = protector.CorrelationKey(command.Pesel);
+        await EnsureAvailable(command.FacilityId, null, command.ScheduledAt, command.DurationMinutes,
+            command.AssignedClinicianId, command.Room, command.VisitType, ct);
+        var correlation = string.IsNullOrWhiteSpace(command.Pesel)
+            ? credentials.Hash($"unlinked:{Guid.NewGuid():N}") : protector.CorrelationKey(command.Pesel);
         var patient = await store.FindPatient(correlation, ct);
-        if (patient is null) { patient = new(correlation, protector.Protect(command.Pesel), clock.UtcNow); store.Add(patient); }
+        if (patient is null) { patient = new(correlation, protector.Protect(command.Pesel ?? ""), clock.UtcNow); store.Add(patient); }
         var visit = new VisitProcess(command.FacilityId, patient.Id, command.ExternalVisitId, command.ScheduledAt,
             command.ServiceExpiresAt, command.AssignedClinicianId, command.Channel, clock.UtcNow, command.TimeZone,
             command.DoctorName, command.DoctorSpecialty, command.FacilityName, command.FacilityAddress,
-            command.Room, command.VisitType, command.LocationInstructions);
+            command.Room, command.VisitType, command.LocationInstructions, command.DurationMinutes);
+        if (command.Patient is not null)
+            store.Add(new ReceptionDetails(visit.Id, protector.Protect(JsonSerializer.Serialize(command.Patient))));
         store.Add(visit); store.Add(new InterviewDraft(visit.Id, clock.UtcNow));
         var agentInterview = new AgentInterview(visit.Id, "pre-visit", clock.UtcNow); store.Add(agentInterview);
         var agentInvitationToken = credentials.GenerateLinkToken();
-        store.Add(new InterviewInvitation(agentInterview.Id, credentials.Hash(agentInvitationToken), visit.ServiceExpiresAt, 3, clock.UtcNow));
-        var access = await CreateInvitationCore(visit, command.Contact, agentInvitationToken, ct);
+        store.Add(new InterviewInvitation(agentInterview.Id, credentials.Hash(agentInvitationToken), visit.ServiceExpiresAt, 3, clock.UtcNow,
+            protector.Protect(agentInvitationToken)));
+        var access = await CreateInvitationCore(visit, command.Contact, agentInvitationToken, ct, command.SendInvitation);
         var result = new InvitationResult(visit.Id, access.LinkToken, access.VisitCode, access.DeliveryStatus, agentInterview.Id, agentInvitationToken);
         store.Add(new AuditEvent(command.FacilityId, visit.Id, "facility-api", "visit.created", clock.UtcNow));
         await store.Save(ct);
         return result;
     }
 
-    public async Task<InvitationResult> RegenerateInvitation(Guid facilityId, Guid visitId, string contact, CancellationToken ct)
+    public async Task<InvitationResult> RegenerateInvitation(Guid facilityId, Guid visitId, string contact, CancellationToken ct,
+        ContactChannel? channel = null, bool sendInvitation = true)
     {
         var visit = await FacilityVisit(facilityId, visitId, ct);
+        visit.Expire(clock.UtcNow);
         if (visit.Status is VisitStatus.Cancelled or VisitStatus.Expired) throw new ConflictError("visit.inactive", "Cannot generate access for an inactive visit.");
+        if (channel is not null) visit.ChangeContactChannel(channel.Value, clock.UtcNow);
         foreach (var grant in await store.GetAccessGrants(visitId, ct)) grant.Revoke(clock.UtcNow);
         await sessions.RevokeForVisit(visitId, ct);
         var interview = await store.GetAgentInterviewByVisit(visitId, ct);
         if (interview is null) { interview = new AgentInterview(visit.Id, "pre-visit", clock.UtcNow); store.Add(interview); }
         foreach (var invitation in await store.GetInterviewInvitations(interview.Id, ct)) invitation.Revoke(clock.UtcNow);
         var agentInvitationToken = credentials.GenerateLinkToken();
-        store.Add(new InterviewInvitation(interview.Id, credentials.Hash(agentInvitationToken), visit.ServiceExpiresAt, 3, clock.UtcNow));
-        var access = await CreateInvitationCore(visit, contact, agentInvitationToken, ct);
+        store.Add(new InterviewInvitation(interview.Id, credentials.Hash(agentInvitationToken), visit.ServiceExpiresAt, 3, clock.UtcNow,
+            protector.Protect(agentInvitationToken)));
+        var access = await CreateInvitationCore(visit, contact, agentInvitationToken, ct, sendInvitation);
         var result = new InvitationResult(visit.Id, access.LinkToken, access.VisitCode, access.DeliveryStatus, interview.Id, agentInvitationToken);
         store.Add(new AuditEvent(facilityId, visitId, "facility-api", "invitation.regenerated", clock.UtcNow));
         await store.Save(ct);
@@ -80,10 +92,13 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
 
     public async Task<AdminVisitView> Update(Guid facilityId, Guid visitId, UpdateVisitCommand command, CancellationToken ct)
     {
+        await using var scheduleLock = await store.LockFacilitySchedule(facilityId, ct);
         var visit = await FacilityVisit(facilityId, visitId, ct);
+        await EnsureAvailable(facilityId, visitId, command.ScheduledAt, command.DurationMinutes,
+            command.AssignedClinicianId, command.Room, command.VisitType, ct);
         visit.Reschedule(command.ScheduledAt, command.ServiceExpiresAt, command.TimeZone, command.AssignedClinicianId,
             command.DoctorName, command.DoctorSpecialty, command.FacilityName, command.FacilityAddress, command.Room,
-            command.VisitType, command.LocationInstructions, clock.UtcNow);
+            command.VisitType, command.LocationInstructions, clock.UtcNow, command.DurationMinutes);
         foreach (var grant in await store.GetAccessGrants(visitId, ct)) grant.ChangeValidity(command.ServiceExpiresAt, clock.UtcNow);
         foreach (var interview in await store.GetAgentInterviewsByVisit(visitId, ct))
             foreach (var invitation in await store.GetInterviewInvitations(interview.Id, ct))
@@ -154,7 +169,8 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
         store.Add(new AuditEvent(facilityId, visitId, "facility-api", $"consent.revoked:{verificationReference}", clock.UtcNow)); await store.Save(ct);
     }
 
-    private async Task<(string LinkToken, string VisitCode, string DeliveryStatus)> CreateInvitationCore(VisitProcess visit, string contact, string interviewInvitationToken, CancellationToken ct)
+    private async Task<(string LinkToken, string VisitCode, string DeliveryStatus)> CreateInvitationCore(VisitProcess visit, string contact, string interviewInvitationToken, CancellationToken ct,
+        bool sendInvitation = true)
     {
         var token = credentials.GenerateLinkToken(); var code = credentials.GenerateVisitCode();
         var generation = (await store.GetAccessGrants(visit.Id, ct)).Count + 1;
@@ -162,10 +178,28 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
         var attempt = new DeliveryAttempt(visit.Id, grant.Id, visit.ContactChannel.ToString(), protector.Protect(contact), clock.UtcNow); store.Add(attempt);
         // Najpierw utrwalamy wizytę i tokeny; dostawca powiadomień nie może dostać linku do nieistniejącej transakcji.
         await store.Save(ct);
+        if (!sendInvitation) return (token, code, attempt.Status.ToString());
         var sent = await notifications.Send(visit.ContactChannel.ToString(), contact, token, code, interviewInvitationToken, ct);
-        if (sent.Delivered) attempt.Delivered(sent.ProviderId); else attempt.Failed(sent.Error ?? "Delivery failed.");
+        if (sent.Delivered) attempt.Delivered(sent.ProviderId, sent.Simulated); else attempt.Failed(sent.Error ?? "Delivery failed.");
         await store.Save(ct);
         return new(token, code, attempt.Status.ToString());
+    }
+
+    private async Task EnsureAvailable(Guid facilityId, Guid? excludedVisitId, DateTimeOffset start, int minutes,
+        string? clinicianId, string? room, string visitType, CancellationToken ct)
+    {
+        if (minutes is < 5 or > 240) throw new ArgumentException("Duration must be between 5 and 240 minutes.");
+        var end = start.AddMinutes(minutes);
+        var occupied = (await store.GetFacilityVisits(facilityId, ct)).Where(x => x.Id != excludedVisitId &&
+            x.Status != VisitStatus.Cancelled && x.ScheduledAt < end && x.ScheduledAt.AddMinutes(x.DurationMinutes) > start);
+        foreach (var visit in occupied)
+        {
+            if (!string.IsNullOrWhiteSpace(clinicianId) && string.Equals(visit.AssignedClinicianId, clinicianId.Trim(), StringComparison.Ordinal))
+                throw new ConflictError("calendar.clinician_conflict", "The clinician already has an appointment in this time slot.");
+            if (visitType == "InPerson" && visit.VisitType == "InPerson" && !string.IsNullOrWhiteSpace(room) &&
+                string.Equals(visit.Room, room.Trim(), StringComparison.OrdinalIgnoreCase))
+                throw new ConflictError("calendar.room_conflict", "The room already has an appointment in this time slot.");
+        }
     }
 
     private async Task<VisitProcess> FacilityVisit(Guid facilityId, Guid visitId, CancellationToken ct)

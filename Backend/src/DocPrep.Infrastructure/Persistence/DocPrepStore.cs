@@ -12,6 +12,25 @@ namespace DocPrep.Infrastructure.Persistence;
 
 internal sealed class DocPrepStore(DocPrepDbContext db) : IDocPrepStore
 {
+    public async Task<IAsyncDisposable> LockFacilitySchedule(Guid facilityId, CancellationToken ct)
+    {
+        // A connection-level lock covers committed saves and is shared by admin and integration bookings.
+        await db.Database.OpenConnectionAsync(ct);
+        try
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_lock(hashtextextended({facilityId.ToString()}, 0))", ct);
+            return new ScheduleLock(db, facilityId);
+        }
+        catch { await db.Database.CloseConnectionAsync(); throw; }
+    }
+    private sealed class ScheduleLock(DocPrepDbContext db, Guid facilityId) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            try { await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_unlock(hashtextextended({facilityId.ToString()}, 0))", CancellationToken.None); }
+            finally { await db.Database.CloseConnectionAsync(); }
+        }
+    }
     public Task<PatientIdentity?> FindPatient(string correlationKey, CancellationToken ct) => db.Patients.SingleOrDefaultAsync(x => x.CorrelationKey == correlationKey, ct);
     public Task<VisitProcess?> FindVisit(Guid facilityId, string externalVisitId, CancellationToken ct) => db.Visits.SingleOrDefaultAsync(x => x.FacilityId == facilityId && x.ExternalVisitId == externalVisitId, ct);
     public Task<VisitProcess?> GetVisit(Guid id, CancellationToken ct) => db.Visits.SingleOrDefaultAsync(x => x.Id == id, ct);

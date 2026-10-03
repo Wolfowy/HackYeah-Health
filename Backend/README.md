@@ -4,6 +4,8 @@ Modularny backend ASP.NET Core 8 realizujący procesy P-01–P-08 z dokumentacji
 
 ## Stack i moduły
 
+Implementacja MVP recepcji, kontrakty API i pozostałe braki: [Adminpanel i kontynuacja rozmowy — stan implementacji](../docs/adminpanel-backend-mvp.md).
+
 - ASP.NET Core Minimal API i OpenAPI,
 - EF Core z PostgreSQL oraz jawnymi migracjami,
 - Redis dla krótkotrwałych sesji pacjenta,

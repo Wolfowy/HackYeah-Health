@@ -13,7 +13,7 @@ public sealed class VisitProcess
         DateTimeOffset serviceExpiresAt, string? assignedClinicianId, ContactChannel channel, DateTimeOffset now,
         string timeZone = "Europe/Warsaw", string? doctorName = null, string? doctorSpecialty = null,
         string? facilityName = null, string? facilityAddress = null, string? room = null,
-        string visitType = "InPerson", string? locationInstructions = null)
+        string visitType = "InPerson", string? locationInstructions = null, int durationMinutes = 30)
     {
         if (scheduledAt <= now) throw new DomainException("visit.invalid_date", "The visit must be scheduled in the future.");
         if (serviceExpiresAt < scheduledAt) throw new DomainException("visit.invalid_expiry", "Service expiry cannot precede the visit.");
@@ -26,6 +26,7 @@ public sealed class VisitProcess
         FacilityName = Trim(facilityName, 200); FacilityAddress = Trim(facilityAddress, 500);
         Room = Trim(room, 100); VisitType = Guard.Required(visitType, nameof(visitType), 100);
         LocationInstructions = Trim(locationInstructions, 1000);
+        SetDuration(durationMinutes);
         Status = VisitStatus.NotStarted; CreatedAt = UpdatedAt = now;
     }
 
@@ -45,6 +46,7 @@ public sealed class VisitProcess
     public string? Room { get; private set; }
     public string VisitType { get; private set; } = "InPerson";
     public string? LocationInstructions { get; private set; }
+    public int DurationMinutes { get; private set; } = 30;
     public VisitStatus Status { get; private set; }
     public Guid? LatestApprovedVersionId { get; private set; }
     public Guid? LatestSharedVersionId { get; private set; }
@@ -120,7 +122,8 @@ public sealed class VisitProcess
 
     public void Reschedule(DateTimeOffset scheduledAt, DateTimeOffset serviceExpiresAt, string timeZone,
         string? assignedClinicianId, string? doctorName, string? doctorSpecialty, string? facilityName,
-        string? facilityAddress, string? room, string visitType, string? locationInstructions, DateTimeOffset now)
+        string? facilityAddress, string? room, string visitType, string? locationInstructions, DateTimeOffset now,
+        int durationMinutes = 30)
     {
         EnsurePatientWorkAllowed(now);
         if (scheduledAt <= now) throw new DomainException("visit.invalid_date", "The visit must be scheduled in the future.");
@@ -132,7 +135,20 @@ public sealed class VisitProcess
         FacilityName = Trim(facilityName, 200); FacilityAddress = Trim(facilityAddress, 500);
         Room = Trim(room, 100); VisitType = Guard.Required(visitType, nameof(visitType), 100);
         LocationInstructions = Trim(locationInstructions, 1000);
+        SetDuration(durationMinutes);
         UpdatedAt = now; ConcurrencyVersion++;
+    }
+
+    public void ChangeContactChannel(ContactChannel channel, DateTimeOffset now)
+    {
+        if (!Enum.IsDefined(channel)) throw new DomainException("visit.invalid_channel", "Unknown contact channel.");
+        ContactChannel = channel; UpdatedAt = now; ConcurrencyVersion++;
+    }
+
+    private void SetDuration(int minutes)
+    {
+        if (minutes is < 5 or > 240) throw new DomainException("visit.invalid_duration", "Duration must be between 5 and 240 minutes.");
+        DurationMinutes = minutes;
     }
 
     public bool CanFacilityReadSharedReport(bool activeConsent) =>

@@ -161,13 +161,15 @@ public sealed class InterviewInvitation
 {
     private InterviewInvitation() { }
 
-    public InterviewInvitation(Guid interviewId, string tokenHash, DateTimeOffset expiresAt, int maxSessionCount, DateTimeOffset now)
+    public InterviewInvitation(Guid interviewId, string tokenHash, DateTimeOffset expiresAt, int maxSessionCount, DateTimeOffset now,
+        string? encryptedToken = null)
     {
         if (expiresAt <= now) throw new DomainException("agent_invitation.invalid_expiry", "Invitation expiry must be in the future.");
         if (maxSessionCount is < 1 or > 10) throw new DomainException("agent_invitation.invalid_limit", "Session limit must be between 1 and 10.");
         Id = Guid.NewGuid();
         InterviewId = interviewId;
         TokenHash = Guard.Required(tokenHash, nameof(tokenHash), 128);
+        EncryptedToken = encryptedToken;
         CreatedAt = now;
         ExpiresAt = expiresAt;
         MaxSessionCount = maxSessionCount;
@@ -176,6 +178,7 @@ public sealed class InterviewInvitation
     public Guid Id { get; private set; }
     public Guid InterviewId { get; private set; }
     public string TokenHash { get; private set; } = "";
+    public string? EncryptedToken { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset? FirstOpenedAt { get; private set; }

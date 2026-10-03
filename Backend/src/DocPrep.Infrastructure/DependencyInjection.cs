@@ -14,6 +14,7 @@ public static class DependencyInjection
         services.AddDbContext<DocPrepDbContext>(o => o.UseNpgsql(configuration.GetConnectionString("Postgres") ?? throw new InvalidOperationException("Postgres connection string is missing.")));
         services.AddStackExchangeRedisCache(o => o.Configuration = configuration.GetConnectionString("Redis"));
         services.AddScoped<IDocPrepStore, DocPrepStore>(); services.AddSingleton<IClock, SystemClock>();
+        services.AddScoped<ReceptionService>();
         services.AddSingleton<IPatientDataProtector, PatientDataProtector>(); services.AddSingleton<ICredentialService, CredentialService>();
         services.AddSingleton<IPatientSessionStore, RedisPatientSessionStore>();
         services.Configure<NotificationOptions>(configuration.GetSection(NotificationOptions.Section));

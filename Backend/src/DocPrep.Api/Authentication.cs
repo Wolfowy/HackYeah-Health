@@ -355,7 +355,12 @@ public sealed class StaffAdministrationService(DocPrepDbContext db, IPasswordHas
         if (await db.StaffUsers.AnyAsync(x => x.Email == email, ct)) throw new ConflictError("staff.email_exists", "The e-mail address is already used.");
         if (request.Role == FacilityRole.Clinician && string.IsNullOrWhiteSpace(request.ClinicianId)) throw new ArgumentException("ClinicianId is required for a clinician.");
         var user = new StaffUser(facilityId, request.Email, request.DisplayName, request.Role, request.ClinicianId, "temporary", clock.UtcNow);
-        user.ReplacePasswordHash(hasher.HashPassword(user, request.Password)); db.StaffUsers.Add(user); await db.SaveChangesAsync(ct);
+        user.ReplacePasswordHash(hasher.HashPassword(user, request.Password)); db.StaffUsers.Add(user);
+        if (user.Role == FacilityRole.Clinician && !await db.Clinicians.AnyAsync(x => x.FacilityId == facilityId && x.Id == user.ClinicianId, ct))
+        {
+            db.Clinicians.Add(new(facilityId, user.ClinicianId!, user.DisplayName, "Medycyna ogólna", null, clock.UtcNow));
+        }
+        await db.SaveChangesAsync(ct);
         return new(user.Id, user.FacilityId, user.Email.ToLowerInvariant(), user.DisplayName, user.Role, user.ClinicianId);
     }
     public async Task<AuthenticatedUserView> Update(Guid facilityId, Guid id, UpdateStaffRequest request, CancellationToken ct)
@@ -441,6 +446,11 @@ public static class StaffIdentitySeeder
             user.ReplacePasswordHash(hasher.HashPassword(user, seed.Password));
             db.StaffUsers.Add(user);
         }
+        await db.SaveChangesAsync();
+        foreach (var user in (await db.StaffUsers.Where(x => x.Role == FacilityRole.Clinician && x.IsActive && x.ClinicianId != null).ToListAsync())
+            .DistinctBy(x => (x.FacilityId, x.ClinicianId)))
+            if (!await db.Clinicians.AnyAsync(x => x.FacilityId == user.FacilityId && x.Id == user.ClinicianId))
+                db.Clinicians.Add(new(user.FacilityId, user.ClinicianId!, user.DisplayName, "Medycyna ogólna", null, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
     }
 }

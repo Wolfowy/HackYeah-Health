@@ -51,7 +51,8 @@ public sealed class DeliveryAttempt
     public DeliveryStatus Status { get; private set; }
     public string? ProviderMessageId { get; private set; }
     public string? FailureReason { get; private set; }
+    public bool IsSimulated { get; private set; }
     public DateTimeOffset AttemptedAt { get; private set; }
-    public void Delivered(string? providerId) { Status = DeliveryStatus.Delivered; ProviderMessageId = providerId; }
+    public void Delivered(string? providerId, bool simulated = false) { Status = DeliveryStatus.Delivered; ProviderMessageId = providerId; IsSimulated = simulated; }
     public void Failed(string reason) { Status = DeliveryStatus.Failed; FailureReason = reason; }
 }
