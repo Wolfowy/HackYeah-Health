@@ -1,4 +1,4 @@
-# DocPrep - karta projektu
+﻿# DocPrep - karta projektu
 
 **Cel:** pomóc pacjentowi przygotować się do wizyty lekarskiej poprzez uporządkowanie informacji o objawach, lekach i pytaniach do lekarza, usprawnić przygotowanie lekarza do konsultacji oraz ograniczyć ponowne zbieranie podstawowych informacji.
 

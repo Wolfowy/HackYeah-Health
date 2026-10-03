@@ -1,61 +1,64 @@
-# HealthPrep Backend
+﻿# DocPrep Backend
 
-Modularny monolit w ASP.NET Core 8, zaprojektowany tak, aby reguły biznesowe oraz integracje z AI, bazą i generatorem PDF można było wymieniać niezależnie.
+Modularny backend ASP.NET Core 8 realizujący procesy P-01–P-08 z dokumentacji projektu.
 
-## Architektura
+## Stack i moduły
 
-- `HealthPrep.Domain` — agregat wizyty, zgody, statusy, deadline edycji i wersjonowanie.
-- `HealthPrep.Application` — przypadki użycia, kontrakty repozytorium, generatora pytań i PDF.
-- `HealthPrep.Infrastructure` — EF Core + PostgreSQL, Redis, adaptacyjny silnik pytań i PDF.
-- `HealthPrep.Api` — wersjonowane Minimal API, OpenAPI, izolacja tenantów i obsługa błędów.
-- `HealthPrep.UnitTests` — testy niezmienników domenowych.
+- ASP.NET Core Minimal API i OpenAPI,
+- EF Core z PostgreSQL oraz jawnymi migracjami,
+- Redis dla krótkotrwałych sesji pacjenta,
+- QuestPDF dla raportów z polskimi znakami,
+- Docker Compose dla API, PostgreSQL i Redis.
 
-PostgreSQL jest źródłem prawdy. Redis jest zarejestrowany jako rozproszony cache i może służyć do statusów, sesji oraz rate limiting bez zmiany domeny. `IInterviewQuestionProvider` jest celowo abstrakcją: obecny deterministyczny provider można zastąpić adapterem LLM bez ingerencji w przypadki użycia.
+Solution zawiera `DocPrep.Domain`, `DocPrep.Application`, `DocPrep.Infrastructure`, `DocPrep.Api` i testy. Model rozdziela proces wizyty, hashowane linki/kody, wersję roboczą, obserwacje, niezmienne wersje raportu, zgody i rundy uzupełniające.
 
 ## Uruchomienie
-
-W katalogu `Backend`:
 
 ```bash
 docker compose up --build
 ```
 
-API: `http://localhost:8080`, Swagger: `http://localhost:8080/swagger`, health check: `http://localhost:8080/health`.
+- API: `http://localhost:8080`
+- Swagger w Development: `http://localhost:8080/swagger`
+- liveness: `http://localhost:8080/health/live`
+- readiness: `http://localhost:8080/health/ready`
 
-Demo integracji używa nagłówka `X-Api-Key: demo-clinic-key`. Endpointy pacjenta używają tymczasowego nagłówka `X-Patient-Id`; przed produkcją należy podmienić go na identyfikator `sub` z firmowego OIDC/OAuth2. Klucze produkcyjne należy przekazywać przez secrets manager, nie przez `appsettings.json`.
+Demo ma trzy role:
 
-## Najważniejsze przepływy
+| Rola | `X-Api-Key` |
+|---|---|
+| Administracja | `demo-admin-key` |
+| Lekarz | `demo-clinician-key` |
+| System placówki | `demo-system-key` |
 
-1. Placówka tworzy wizytę: `POST /api/v1/integration/appointments`.
-2. Pacjent odpowiada: `POST /api/v1/patient/appointments/{id}/answers` (tekst lub transkrypcja głosu).
-3. Pacjent edytuje dane: `PUT /api/v1/patient/appointments/{id}/summary`.
-4. Pacjent zatwierdza wersję i nadaje zgodę: `POST .../approve`, następnie `PUT .../consent`.
-5. Placówka pobiera zatwierdzony JSON/PDF dopiero po zgodzie.
-6. Lekarz może przesłać pytanie uzupełniające; wcześniejsze wersje pozostają zachowane.
+Wartości są przeznaczone wyłącznie do lokalnego demo. Klucze integracyjne oraz `Security__PatientHmacKey` i `Security__EncryptionKey` muszą być nadpisane sekretami środowiska produkcyjnego.
 
-Przykład utworzenia wizyty:
+## Dostęp pacjenta
 
-```bash
-curl -X POST http://localhost:8080/api/v1/integration/appointments \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: demo-clinic-key" \
-  -d '{"externalAppointmentId":"visit-001","externalPatientId":"patient-001","scheduledAt":"2026-12-10T10:00:00Z","consultationReason":"Recurring headache"}'
+Pacjent nie posiada konta i nie przekazuje PESEL-u jako poświadczenia. Placówka tworzy wizytę i otrzymuje jednorazowo link token oraz kod. Pacjent wymienia jeden z nich na krótko żyjący opaque bearer token ograniczony do jednego wywiadu:
+
+```text
+POST /api/v1/patient-access/link/exchange
+POST /api/v1/patient-access/code/exchange
 ```
 
-## Decyzje pod dalszy rozwój
+Pozostałe endpointy pacjenta używają `Authorization: Bearer <session-token>`. Nie istnieje endpoint przeglądania historii pacjenta.
 
-- Każda placówka ma `TenantId`; zapytania integracyjne nigdy nie zwracają danych obcego tenantu.
-- Raport placówki wymaga jednocześnie zatwierdzonego statusu i aktualnej zgody pacjenta.
-- Snapshoty JSON są niezmienne i wersjonowane; dane robocze pozostają edytowalne do deadline'u.
-- Obserwacje trendów wskazują konkretne wizyty i nie interpretują braku wzmianki jako ustąpienia objawu.
-- Audio powinno trafić do osobnego object storage, a backend powinien przechowywać tylko metadane i zweryfikowaną transkrypcję.
-- `Database:Initialize=true` wykorzystuje `EnsureCreated` dla szybkiego demo. Przed produkcją należy ustawić `false` i wdrażać jawne migracje EF w pipeline.
+## Izolacja danych
 
-## Weryfikacja lokalna
+- Administracja pobiera wyłącznie status, termin, dostarczenie zaproszenia i stan rundy.
+- Lekarz pobiera immutable `ReportVersion`, nigdy draft.
+- Podczas edycji poprzednia udostępniona wersja pozostaje dostępna.
+- Cofnięcie zgody natychmiast blokuje kolejne pobrania.
+- JSON i PDF są zapisane z tego samego snapshotu i mają wspólny `VersionId`.
+- PESEL służy jedynie do tworzenia HMAC correlation key; wartość źródłowa jest szyfrowana.
+
+## Komendy developerskie
 
 ```bash
-dotnet restore HealthPrep.sln
-dotnet build HealthPrep.sln --no-restore
-dotnet test HealthPrep.sln --no-build
+dotnet restore DocPrep.sln
+dotnet build DocPrep.sln --no-restore -c Release
+dotnet test DocPrep.sln --no-build -c Release
+dotnet ef database update --project src/DocPrep.Infrastructure --startup-project src/DocPrep.Api
 docker compose config
 ```

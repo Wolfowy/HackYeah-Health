@@ -1,4 +1,4 @@
-# DocPrep - dokumentacja procesów MVP
+﻿# DocPrep - dokumentacja procesów MVP
 
 **Wersja:** 1.0  
 **Status:** specyfikacja docelowa (TO-BE)  
