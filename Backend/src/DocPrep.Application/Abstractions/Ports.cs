@@ -12,6 +12,7 @@ namespace DocPrep.Application.Abstractions;
 
 public interface IDocPrepStore
 {
+    Task<IAsyncDisposable> LockFacilitySchedule(Guid facilityId, CancellationToken ct);
     Task<PatientIdentity?> FindPatient(string correlationKey, CancellationToken ct);
     Task<VisitProcess?> FindVisit(Guid facilityId, string externalVisitId, CancellationToken ct);
     Task<VisitProcess?> GetVisit(Guid id, CancellationToken ct);
@@ -67,10 +68,11 @@ public interface IPatientSessionStore
 }
 public interface INotificationSender
 {
+    Task<NotificationResult> SendInterviewLink(string channel, string destination, string interviewInvitationToken, CancellationToken ct);
     Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode, string interviewInvitationToken, CancellationToken ct);
     Task<NotificationResult> SendSupplementation(string channel, string destination, string interviewInvitationToken, CancellationToken ct);
 }
-public sealed record NotificationResult(bool Delivered, string? ProviderId, string? Error);
+public sealed record NotificationResult(bool Delivered, string? ProviderId, string? Error, bool Simulated = false);
 public interface IInterviewQuestionProvider { Task<string?> Next(InterviewDraft draft, CancellationToken ct); }
 public interface IReportRenderer { byte[] Render(ReportSnapshot snapshot); }
 public interface ITranscriptionService { Task<string> Transcribe(Stream audio, string contentType, CancellationToken ct); }

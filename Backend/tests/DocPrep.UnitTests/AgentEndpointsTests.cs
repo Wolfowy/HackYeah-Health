@@ -23,6 +23,7 @@ public sealed class PostgresFactAttribute : FactAttribute
     { if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DOCPREP_TEST_POSTGRES"))) Skip = "Requires an isolated PostgreSQL database (DOCPREP_TEST_POSTGRES)."; }
 }
 
+[Collection("Postgres")]
 public sealed class AgentEndpointsTests
 {
     [PostgresFact]
@@ -55,7 +56,7 @@ public sealed class AgentEndpointsTests
         async Task<JsonElement> CreateVisit()
         {
             var response = await facility.PostAsJsonAsync("/api/v1/integration/visits", new {
-                externalVisitId = Guid.NewGuid().ToString(), pesel = "00000000000", scheduledAt = DateTimeOffset.UtcNow.AddDays(5),
+                externalVisitId = Guid.NewGuid().ToString(), pesel = "00000000000", scheduledAt = DateTimeOffset.UtcNow.AddDays(5).AddHours(visits.Count),
                 serviceExpiresAt = DateTimeOffset.UtcNow.AddDays(7), contact = "patient@example.invalid", channel = "Email", assignedClinicianId = "doctor-demo"
             });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -106,6 +107,7 @@ public sealed class AgentEndpointsTests
             var voice = await voiceResponse.Content.ReadFromJsonAsync<JsonElement>();
             var voiceSession = voice.GetProperty("sessionId").GetGuid();
             Assert.Equal("temporary-voice", voice.GetProperty("conversationToken").GetString());
+            Assert.False(voice.GetProperty("dynamicVariables").GetProperty("is_continuation").GetBoolean());
             Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"/api/interview-sessions/{voiceSession}/provider-conversation", new { conversationId = "conv_other" })).StatusCode);
             await client.PostAsJsonAsync($"/api/interview-sessions/{voiceSession}/end", new { continuesInterview = true });
             Assert.Equal(HttpStatusCode.OK, (await Webhook(voice.GetProperty("conversationId").GetString()!, "Wstępna rozmowa")).StatusCode);
@@ -116,6 +118,9 @@ public sealed class AgentEndpointsTests
             var text = await textResponse.Content.ReadFromJsonAsync<JsonElement>();
             var textSession = text.GetProperty("sessionId").GetGuid();
             Assert.Equal("wss://temporary-text", text.GetProperty("signedUrl").GetString());
+            Assert.NotEqual(voice.GetProperty("conversationId").GetString(), text.GetProperty("conversationId").GetString());
+            Assert.True(text.GetProperty("dynamicVariables").GetProperty("is_continuation").GetBoolean());
+            Assert.Contains("Wstępna rozmowa", text.GetProperty("dynamicVariables").GetProperty("previous_conversation_summary").GetString());
             var bind = await client.PutAsJsonAsync($"/api/interview-sessions/{textSession}/provider-conversation", new { conversationId = text.GetProperty("conversationId").GetString() });
             Assert.True(bind.StatusCode == HttpStatusCode.NoContent, await bind.Content.ReadAsStringAsync());
             await client.PostAsJsonAsync($"/api/interview-sessions/{textSession}/end", new { });
@@ -179,7 +184,7 @@ public sealed class AgentEndpointsTests
         public Task<ElevenLabsCredential> CreateTextCredential(string participantName, CancellationToken ct) =>
             Task.FromResult(new ElevenLabsCredential(null, "wss://temporary-text", $"conv_{suffix}_{Interlocked.Increment(ref count)}"));
     }
-    private sealed class MemorySessions : IPatientSessionStore
+    internal sealed class MemorySessions : IPatientSessionStore
     {
         private readonly ConcurrentDictionary<string, Guid> tokens = new();
         public Task<string> Create(Guid visitId, DateTimeOffset expiresAt, CancellationToken ct)

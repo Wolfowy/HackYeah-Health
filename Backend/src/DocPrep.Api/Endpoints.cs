@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace DocPrep.Api;
 
-public static class Endpoints
+public static partial class Endpoints
 {
     private static readonly HashSet<string> AllowedAudioTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -27,6 +27,7 @@ public static class Endpoints
         MapAuthentication(app);
         MapPatientAccounts(app);
         MapElevenLabsInterviews(app);
+        MapReception(app);
 
         var access = app.MapGroup("/api/v1/patient-access")
             .WithTags("Patient access")
@@ -112,7 +113,7 @@ public static class Endpoints
             var result = await service.CreateVisit(new(facility.FacilityId, request.ExternalVisitId, request.Pesel,
                 request.ScheduledAt, request.ServiceExpiresAt, request.Contact, request.Channel, request.AssignedClinicianId,
                 request.TimeZone, request.DoctorName, request.DoctorSpecialty, request.FacilityName, request.FacilityAddress,
-                request.Room, request.VisitType, request.LocationInstructions), ct);
+                request.Room, request.VisitType, request.LocationInstructions, request.DurationMinutes), ct);
             return Results.Created($"/api/v1/integration/visits/{result.VisitId}/status", result);
         }).Produces<InvitationResult>(201).ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(409);
         integration.MapPost("/visits/{id:guid}/invitations", async (Guid id, InvitationRequest request, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
@@ -134,7 +135,7 @@ public static class Endpoints
             return Results.Ok(await service.Update(facility.FacilityId, id, new(request.ScheduledAt,
                 request.ServiceExpiresAt, request.TimeZone, request.AssignedClinicianId, request.DoctorName,
                 request.DoctorSpecialty, request.FacilityName, request.FacilityAddress, request.Room,
-                request.VisitType, request.LocationInstructions), ct));
+                request.VisitType, request.LocationInstructions, request.DurationMinutes), ct));
         }).Produces<AdminVisitView>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
         integration.MapPost("/visits/{id:guid}/cancel", async (Guid id, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
         {
@@ -401,10 +402,10 @@ public sealed record CreateVisitRequest(string ExternalVisitId, string Pesel, Da
     DateTimeOffset ServiceExpiresAt, string Contact, Domain.Visits.ContactChannel Channel,
     string? AssignedClinicianId, string TimeZone = "Europe/Warsaw", string? DoctorName = null,
     string? DoctorSpecialty = null, string? FacilityName = null, string? FacilityAddress = null,
-    string? Room = null, string VisitType = "InPerson", string? LocationInstructions = null);
+    string? Room = null, string VisitType = "InPerson", string? LocationInstructions = null, int DurationMinutes = 30);
 public sealed record UpdateVisitRequest(DateTimeOffset ScheduledAt, DateTimeOffset ServiceExpiresAt,
     string TimeZone, string? AssignedClinicianId, string? DoctorName, string? DoctorSpecialty,
-    string? FacilityName, string? FacilityAddress, string? Room, string VisitType, string? LocationInstructions);
+    string? FacilityName, string? FacilityAddress, string? Room, string VisitType, string? LocationInstructions, int DurationMinutes = 30);
 public sealed record InvitationRequest(string Contact);
 public sealed record DeletionRequestContract(string Pesel, string VerificationReference);
 public sealed record DeletionRequestResponse(Guid RequestId);

@@ -57,7 +57,7 @@ public sealed class FacilityReportService(IDocPrepStore store, IClock clock, INo
             store.Add(interview);
             invitationToken = credentials.GenerateLinkToken();
             store.Add(new DocPrep.Domain.Interviews.InterviewInvitation(interview.Id, credentials.Hash(invitationToken),
-                visit.ServiceExpiresAt, 3, clock.UtcNow));
+                visit.ServiceExpiresAt, 3, clock.UtcNow, protector.Protect(invitationToken)));
         }
         foreach (var question in command.Questions) round.AddQuestion(question, command.ClinicianId, clock.UtcNow);
         visit.RequireSupplementation(clock.UtcNow);

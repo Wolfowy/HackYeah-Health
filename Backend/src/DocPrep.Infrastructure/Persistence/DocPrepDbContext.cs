@@ -14,6 +14,8 @@ namespace DocPrep.Infrastructure.Persistence;
 public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options) : DbContext(options)
 {
     public DbSet<Facility> Facilities => Set<Facility>();
+    public DbSet<Clinician> Clinicians => Set<Clinician>();
+    public DbSet<ReceptionDetails> ReceptionDetails => Set<ReceptionDetails>();
     public DbSet<PatientIdentity> Patients => Set<PatientIdentity>();
     public DbSet<VisitProcess> Visits => Set<VisitProcess>();
     public DbSet<PatientAccessGrant> AccessGrants => Set<PatientAccessGrant>();
@@ -38,6 +40,18 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasDefaultSchema("docprep");
+        b.Entity<Clinician>(e =>
+        {
+            e.ToTable("clinicians"); e.HasKey(x => new { x.FacilityId, x.Id });
+            e.Property(x => x.Id).HasMaxLength(200); e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Specialty).HasMaxLength(200); e.Property(x => x.DefaultRoom).HasMaxLength(100);
+            e.HasOne<Facility>().WithMany().HasForeignKey(x => x.FacilityId).OnDelete(DeleteBehavior.Restrict);
+        });
+        b.Entity<ReceptionDetails>(e =>
+        {
+            e.ToTable("reception_details"); e.HasKey(x => x.VisitProcessId);
+            e.HasOne<VisitProcess>().WithOne().HasForeignKey<ReceptionDetails>(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<Facility>(e => { e.ToTable("facilities"); e.HasKey(x => x.Id); e.Property(x => x.Name).HasMaxLength(200); e.HasData(new Facility(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Przychodnia Demo")); });
         b.Entity<StaffUser>(e =>
         {
@@ -103,6 +117,8 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
         b.Entity<VisitProcess>(e =>
         {
             e.ToTable("visits"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.FacilityId, x.ExternalVisitId }).IsUnique();
+            e.Property(x => x.DurationMinutes).HasDefaultValue(30);
+            e.HasIndex(x => new { x.FacilityId, x.ScheduledAt });
             e.HasOne<Facility>().WithMany().HasForeignKey(x => x.FacilityId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<PatientIdentity>().WithMany().HasForeignKey(x => x.PatientIdentityId).OnDelete(DeleteBehavior.Cascade);
             e.Property(x => x.Status).HasConversion<string>(); e.Property(x => x.ContactChannel).HasConversion<string>(); e.Property(x => x.ConcurrencyVersion).IsConcurrencyToken();

@@ -16,17 +16,19 @@ internal sealed class SystemClock : IClock { public DateTimeOffset UtcNow => Dat
 
 internal sealed class DemoNotificationSender(ILogger<DemoNotificationSender> logger, IHostEnvironment environment) : INotificationSender
 {
+    public Task<NotificationResult> SendInterviewLink(string channel, string destination, string interviewInvitationToken, CancellationToken ct) =>
+        Send(channel, destination, "", "", interviewInvitationToken, ct);
     public Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode, string interviewInvitationToken, CancellationToken ct)
     {
         if (!environment.IsDevelopment()) return Task.FromResult(new NotificationResult(false, null, "Notification provider is not configured."));
         logger.LogInformation("Demo {Channel} invitation accepted by notification adapter", channel);
-        return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null));
+        return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null, true));
     }
     public Task<NotificationResult> SendSupplementation(string channel, string destination, string interviewInvitationToken, CancellationToken ct)
     {
         if (!environment.IsDevelopment()) return Task.FromResult(new NotificationResult(false, null, "Notification provider is not configured."));
         logger.LogInformation("Demo {Channel} supplementation notification accepted by notification adapter", channel);
-        return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null));
+        return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null, true));
     }
 }
 
@@ -41,6 +43,9 @@ public sealed class NotificationOptions
 internal sealed class HttpNotificationSender(HttpClient http, Microsoft.Extensions.Options.IOptions<NotificationOptions> options) : INotificationSender
 {
     private readonly NotificationOptions settings = options.Value;
+    public Task<NotificationResult> SendInterviewLink(string channel, string destination, string interviewInvitationToken, CancellationToken ct) =>
+        SendPayload(new { channel, destination, kind = "invitation",
+            interviewUrl = $"{settings.FrontendBaseUrl.TrimEnd('/')}/i/{Uri.EscapeDataString(interviewInvitationToken)}" }, ct);
     public Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode,
         string interviewInvitationToken, CancellationToken ct) => SendPayload(new
         {

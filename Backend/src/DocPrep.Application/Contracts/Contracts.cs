@@ -4,11 +4,12 @@ using DocPrep.Domain.Visits;
 
 namespace DocPrep.Application.Contracts;
 
-public sealed record CreateVisitCommand(Guid FacilityId, string ExternalVisitId, string Pesel, DateTimeOffset ScheduledAt,
+public sealed record CreateVisitCommand(Guid FacilityId, string ExternalVisitId, string? Pesel, DateTimeOffset ScheduledAt,
     DateTimeOffset ServiceExpiresAt, string Contact, ContactChannel Channel, string? AssignedClinicianId,
     string TimeZone = "Europe/Warsaw", string? DoctorName = null, string? DoctorSpecialty = null,
     string? FacilityName = null, string? FacilityAddress = null, string? Room = null,
-    string VisitType = "InPerson", string? LocationInstructions = null);
+    string VisitType = "InPerson", string? LocationInstructions = null, int DurationMinutes = 30,
+    ReceptionPatient? Patient = null, bool SendInvitation = true);
 public sealed record InvitationResult(Guid VisitId, string LinkToken, string VisitCode, string DeliveryStatus,
     Guid InterviewId, string InterviewInvitationToken);
 public sealed record ExchangeAccessResult(string SessionToken, Guid VisitId, DateTimeOffset ExpiresAt);
@@ -23,7 +24,7 @@ public sealed record VisitDetails(Guid Id, string ExternalVisitId, DateTimeOffse
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total);
 public sealed record UpdateVisitCommand(DateTimeOffset ScheduledAt, DateTimeOffset ServiceExpiresAt, string TimeZone,
     string? AssignedClinicianId, string? DoctorName, string? DoctorSpecialty, string? FacilityName,
-    string? FacilityAddress, string? Room, string VisitType, string? LocationInstructions);
+    string? FacilityAddress, string? Room, string VisitType, string? LocationInstructions, int DurationMinutes = 30);
 public sealed record PatientInterviewView(Guid VisitId, DateTimeOffset ScheduledAt, DateTimeOffset ServiceExpiresAt, VisitStatus Status,
     DraftView Draft, IReadOnlyList<PatientObservationView> Observations, SupplementationRoundView? SupplementationRound,
     int? LatestVersion, bool ConsentActive);
@@ -69,7 +70,8 @@ public sealed record AgentInterviewView(Guid Id, string DisplayName, DateTimeOff
 public sealed record AgentInterviewResultView(Guid Id, string Status, string? FinalReport, string? StructuredDataJson,
     NormalizedInterviewData? StructuredData = null, int? SchemaVersion = null, string ExtractionStatus = "pending",
     string ImportStatus = "pending", IReadOnlyList<ExtractionIssue>? Issues = null);
-public sealed record AgentSessionResult(Guid SessionId, string Mode, string Provider, string? ConversationToken, string? SignedUrl, string? ConversationId);
+public sealed record AgentSessionResult(Guid SessionId, string Mode, string Provider, string? ConversationToken, string? SignedUrl,
+    string? ConversationId, string? UserId = null, IReadOnlyDictionary<string, object>? DynamicVariables = null);
 public sealed record AgentInterviewAccess(Guid? VisitId, Guid? InterviewId, Guid? InvitationId, Guid? UserId)
 {
     public static AgentInterviewAccess ForVisit(Guid visitId) => new(visitId, null, null, null);

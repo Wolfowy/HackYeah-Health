@@ -13,6 +13,9 @@ services:
       ElevenLabs__AgentId: ${ELEVENLABS_AGENT_ID:-}
       ElevenLabs__Environment: ${ELEVENLABS_ENVIRONMENT:-production}
       ElevenLabs__WebhookSecret: ${ELEVENLABS_WEBHOOK_SECRET:-}
+      Notifications__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://127.0.0.1:5173}
+      Notifications__ProviderUrl: ${NOTIFICATIONS_PROVIDER_URL:-}
+      Notifications__ApiKey: ${NOTIFICATIONS_API_KEY:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
