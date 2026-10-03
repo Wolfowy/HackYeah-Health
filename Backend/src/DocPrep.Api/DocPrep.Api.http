@@ -2,7 +2,28 @@
 @adminKey = demo-admin-key
 @clinicianKey = demo-clinician-key
 
-### Utworzenie wizyty — użyj poprawnego demonstracyjnego PESEL-u
+### Logowanie personelu administracyjnego
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@docprep.local",
+  "password": "DocPrepDemo!2026"
+}
+
+### Kontekst zalogowanego użytkownika panelu
+@staffAccessToken = replace-me
+GET {{host}}/api/v1/auth/me
+Authorization: Bearer {{staffAccessToken}}
+
+### Odnowienie sesji personelu (token jest rotowany)
+@staffRefreshToken = replace-me
+POST {{host}}/api/v1/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{staffRefreshToken}}" }
+
+### Utworzenie wizyty przez integrację serwer-serwer
 POST {{host}}/api/v1/integration/visits
 Content-Type: application/json
 X-Api-Key: {{adminKey}}
@@ -17,9 +38,9 @@ X-Api-Key: {{adminKey}}
   "assignedClinicianId": "doctor-demo"
 }
 
-### Dashboard administracyjny — bez treści klinicznej
+### Dashboard panelu przez JWT (alternatywnie można użyć API key serwer-serwer)
 GET {{host}}/api/v1/integration/visits
-X-Api-Key: {{adminKey}}
+Authorization: Bearer {{staffAccessToken}}
 
 ### Wymiana link tokenu zwróconego przy tworzeniu wizyty
 @linkToken = replace-me
@@ -28,12 +49,51 @@ Content-Type: application/json
 
 { "token": "{{linkToken}}" }
 
-### Kontekst pojedynczego wywiadu
+### Kontekst pojedynczego wywiadu pacjenta
 @patientSession = replace-me
-GET {{host}}/api/v1/interview/
+GET {{host}}/api/v1/interview
 Authorization: Bearer {{patientSession}}
 
-### Lista wersji dla lekarza
+### Lista udostępnionych wersji dla przypisanego lekarza
 @visitId = 00000000-0000-0000-0000-000000000000
 GET {{host}}/api/v1/integration/visits/{{visitId}}/report-versions
 X-Api-Key: {{clinicianKey}}
+
+### Walidacja publicznego zaproszenia ElevenLabs
+@interviewInvitationToken = replace-me
+GET {{host}}/api/public/interviews/{{interviewInvitationToken}}
+
+### Wymiana tokenu zaproszenia na anonimowy JWT
+POST {{host}}/api/public/interviews/{{interviewInvitationToken}}/authorize
+
+### Rozpoczęcie rozmowy voice przez WebRTC
+@anonymousInterviewToken = replace-me
+@interviewId = 00000000-0000-0000-0000-000000000000
+POST {{host}}/api/interviews/{{interviewId}}/sessions
+Authorization: Bearer {{anonymousInterviewToken}}
+Content-Type: application/json
+
+{ "mode": "Voice" }
+
+### Rozpoczęcie chatu przez signed WebSocket URL
+POST {{host}}/api/interviews/{{interviewId}}/sessions
+Authorization: Bearer {{anonymousInterviewToken}}
+Content-Type: application/json
+
+{ "mode": "Text" }
+
+### Powiązanie conversationId zwróconego przez startSession()
+@interviewSessionId = 00000000-0000-0000-0000-000000000000
+PUT {{host}}/api/interview-sessions/{{interviewSessionId}}/provider-conversation
+Authorization: Bearer {{anonymousInterviewToken}}
+Content-Type: application/json
+
+{ "conversationId": "conv_replace-me" }
+
+### Status przetwarzania wywiadu
+GET {{host}}/api/interviews/{{interviewId}}
+Authorization: Bearer {{anonymousInterviewToken}}
+
+### Wynik po webhooku post_call_transcription
+GET {{host}}/api/interviews/{{interviewId}}/result
+Authorization: Bearer {{anonymousInterviewToken}}

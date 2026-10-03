@@ -15,7 +15,7 @@ internal sealed class SystemClock : IClock { public DateTimeOffset UtcNow => Dat
 
 internal sealed class DemoNotificationSender(ILogger<DemoNotificationSender> logger) : INotificationSender
 {
-    public Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode, CancellationToken ct)
+    public Task<NotificationResult> Send(string channel, string destination, string linkToken, string visitCode, string interviewInvitationToken, CancellationToken ct)
     {
         logger.LogInformation("Demo {Channel} invitation accepted by notification adapter", channel);
         return Task.FromResult(new NotificationResult(true, $"demo-{Guid.NewGuid():N}", null));

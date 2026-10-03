@@ -26,11 +26,59 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
     public DbSet<SupplementationRound> SupplementationRounds => Set<SupplementationRound>();
     public DbSet<DeletionRequest> DeletionRequests => Set<DeletionRequest>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<StaffUser> StaffUsers => Set<StaffUser>();
+    public DbSet<StaffRefreshToken> StaffRefreshTokens => Set<StaffRefreshToken>();
+    public DbSet<AgentInterview> AgentInterviews => Set<AgentInterview>();
+    public DbSet<AgentInterviewSession> AgentInterviewSessions => Set<AgentInterviewSession>();
+    public DbSet<InterviewInvitation> InterviewInvitations => Set<InterviewInvitation>();
+    public DbSet<ExternalWebhookEvent> ExternalWebhookEvents => Set<ExternalWebhookEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasDefaultSchema("docprep");
         b.Entity<Facility>(e => { e.ToTable("facilities"); e.HasKey(x => x.Id); e.Property(x => x.Name).HasMaxLength(200); e.HasData(new Facility(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Przychodnia Demo")); });
+        b.Entity<StaffUser>(e =>
+        {
+            e.ToTable("staff_users"); e.HasKey(x => x.Id); e.HasIndex(x => x.Email).IsUnique();
+            e.Property(x => x.Email).HasMaxLength(320); e.Property(x => x.DisplayName).HasMaxLength(200);
+            e.Property(x => x.Role).HasConversion<string>(); e.Property(x => x.ClinicianId).HasMaxLength(200);
+            e.Property(x => x.PasswordHash).HasMaxLength(2000);
+            e.HasOne<Facility>().WithMany().HasForeignKey(x => x.FacilityId).OnDelete(DeleteBehavior.Restrict);
+        });
+        b.Entity<StaffRefreshToken>(e =>
+        {
+            e.ToTable("staff_refresh_tokens"); e.HasKey(x => x.Id); e.HasIndex(x => x.TokenHash).IsUnique();
+            e.Property(x => x.TokenHash).HasMaxLength(128); e.Property(x => x.ReplacedByTokenHash).HasMaxLength(128);
+            e.Property(x => x.ConcurrencyVersion).IsConcurrencyToken();
+            e.HasOne<StaffUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<AgentInterview>(e =>
+        {
+            e.ToTable("agent_interviews"); e.HasKey(x => x.Id); e.HasIndex(x => x.VisitProcessId).IsUnique();
+            e.Property(x => x.Status).HasConversion<string>(); e.Property(x => x.InterviewType).HasMaxLength(100);
+            e.Property(x => x.StructuredDataJson).HasColumnType("jsonb");
+            e.HasOne<VisitProcess>().WithMany().HasForeignKey(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<AgentInterviewSession>(e =>
+        {
+            e.ToTable("agent_interview_sessions"); e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ProviderConversationId).IsUnique(); e.Property(x => x.ProviderConversationId).HasMaxLength(200);
+            e.Property(x => x.Provider).HasMaxLength(50); e.Property(x => x.Mode).HasConversion<string>(); e.Property(x => x.Status).HasConversion<string>();
+            e.Property(x => x.TranscriptJson).HasColumnType("jsonb"); e.Property(x => x.AnalysisJson).HasColumnType("jsonb"); e.Property(x => x.MetadataJson).HasColumnType("jsonb");
+            e.HasOne<AgentInterview>().WithMany().HasForeignKey(x => x.InterviewId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<StaffUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
+        });
+        b.Entity<InterviewInvitation>(e =>
+        {
+            e.ToTable("interview_invitations"); e.HasKey(x => x.Id); e.HasIndex(x => x.TokenHash).IsUnique();
+            e.Property(x => x.TokenHash).HasMaxLength(128); e.Property(x => x.ConcurrencyVersion).IsConcurrencyToken();
+            e.HasOne<AgentInterview>().WithMany().HasForeignKey(x => x.InterviewId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ExternalWebhookEvent>(e =>
+        {
+            e.ToTable("external_webhook_events"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.Provider, x.ExternalEventId }).IsUnique();
+            e.Property(x => x.Provider).HasMaxLength(50); e.Property(x => x.ExternalEventId).HasMaxLength(300); e.Property(x => x.PayloadHash).HasMaxLength(128);
+        });
         b.Entity<PatientIdentity>(e => { e.ToTable("patients"); e.HasKey(x => x.Id); e.HasIndex(x => x.CorrelationKey).IsUnique(); e.Property(x => x.CorrelationKey).HasMaxLength(128); });
         b.Entity<VisitProcess>(e =>
         {

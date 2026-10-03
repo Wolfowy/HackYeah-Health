@@ -20,7 +20,11 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
         var visit = new VisitProcess(command.FacilityId, patient.Id, command.ExternalVisitId, command.ScheduledAt,
             command.ServiceExpiresAt, command.AssignedClinicianId, command.Channel, clock.UtcNow);
         store.Add(visit); store.Add(new InterviewDraft(visit.Id, clock.UtcNow));
-        var result = await CreateInvitationCore(visit, command.Contact, ct);
+        var agentInterview = new AgentInterview(visit.Id, "pre-visit", clock.UtcNow); store.Add(agentInterview);
+        var agentInvitationToken = credentials.GenerateLinkToken();
+        store.Add(new InterviewInvitation(agentInterview.Id, credentials.Hash(agentInvitationToken), visit.ServiceExpiresAt, 3, clock.UtcNow));
+        var access = await CreateInvitationCore(visit, command.Contact, agentInvitationToken, ct);
+        var result = new InvitationResult(visit.Id, access.LinkToken, access.VisitCode, access.DeliveryStatus, agentInterview.Id, agentInvitationToken);
         store.Add(new AuditEvent(command.FacilityId, visit.Id, "facility-api", "visit.created", clock.UtcNow));
         await store.Save(ct);
         return result;
@@ -32,7 +36,13 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
         if (visit.Status is VisitStatus.Cancelled or VisitStatus.Expired) throw new ConflictError("visit.inactive", "Cannot generate access for an inactive visit.");
         foreach (var grant in await store.GetAccessGrants(visitId, ct)) grant.Revoke(clock.UtcNow);
         await sessions.RevokeForVisit(visitId, ct);
-        var result = await CreateInvitationCore(visit, contact, ct);
+        var interview = await store.GetAgentInterviewByVisit(visitId, ct);
+        if (interview is null) { interview = new AgentInterview(visit.Id, "pre-visit", clock.UtcNow); store.Add(interview); }
+        foreach (var invitation in await store.GetInterviewInvitations(interview.Id, ct)) invitation.Revoke(clock.UtcNow);
+        var agentInvitationToken = credentials.GenerateLinkToken();
+        store.Add(new InterviewInvitation(interview.Id, credentials.Hash(agentInvitationToken), visit.ServiceExpiresAt, 3, clock.UtcNow));
+        var access = await CreateInvitationCore(visit, contact, agentInvitationToken, ct);
+        var result = new InvitationResult(visit.Id, access.LinkToken, access.VisitCode, access.DeliveryStatus, interview.Id, agentInvitationToken);
         store.Add(new AuditEvent(facilityId, visitId, "facility-api", "invitation.regenerated", clock.UtcNow));
         await store.Save(ct);
         return result;
@@ -85,15 +95,15 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
         store.Add(new AuditEvent(facilityId, visitId, "facility-api", $"consent.revoked:{verificationReference}", clock.UtcNow)); await store.Save(ct);
     }
 
-    private async Task<InvitationResult> CreateInvitationCore(VisitProcess visit, string contact, CancellationToken ct)
+    private async Task<(string LinkToken, string VisitCode, string DeliveryStatus)> CreateInvitationCore(VisitProcess visit, string contact, string interviewInvitationToken, CancellationToken ct)
     {
         var token = credentials.GenerateLinkToken(); var code = credentials.GenerateVisitCode();
         var generation = (await store.GetAccessGrants(visit.Id, ct)).Count + 1;
         var grant = new PatientAccessGrant(visit.Id, credentials.Hash(token), credentials.Hash(code), generation, visit.ServiceExpiresAt, clock.UtcNow); store.Add(grant);
         var attempt = new DeliveryAttempt(visit.Id, grant.Id, visit.ContactChannel.ToString(), protector.Protect(contact), clock.UtcNow); store.Add(attempt);
-        var sent = await notifications.Send(visit.ContactChannel.ToString(), contact, token, code, ct);
+        var sent = await notifications.Send(visit.ContactChannel.ToString(), contact, token, code, interviewInvitationToken, ct);
         if (sent.Delivered) attempt.Delivered(sent.ProviderId); else attempt.Failed(sent.Error ?? "Delivery failed.");
-        return new(visit.Id, token, code, attempt.Status.ToString());
+        return new(token, code, attempt.Status.ToString());
     }
 
     private async Task<VisitProcess> FacilityVisit(Guid facilityId, Guid visitId, CancellationToken ct)

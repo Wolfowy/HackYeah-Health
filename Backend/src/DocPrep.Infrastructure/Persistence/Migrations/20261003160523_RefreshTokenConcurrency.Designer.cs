@@ -3,6 +3,7 @@ using System;
 using DocPrep.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DocPrep.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(DocPrepDbContext))]
-    partial class DocPrepDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003160523_RefreshTokenConcurrency")]
+    partial class RefreshTokenConcurrency
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -134,106 +137,6 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                     b.ToTable("patients", "docprep");
                 });
 
-            modelBuilder.Entity("DocPrep.Domain.Interviews.AgentInterview", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("FinalReport")
-                        .HasColumnType("text");
-
-                    b.Property<string>("InterviewType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset?>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("StructuredDataJson")
-                        .HasColumnType("jsonb");
-
-                    b.Property<Guid>("VisitProcessId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("VisitProcessId")
-                        .IsUnique();
-
-                    b.ToTable("agent_interviews", "docprep");
-                });
-
-            modelBuilder.Entity("DocPrep.Domain.Interviews.AgentInterviewSession", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AnalysisJson")
-                        .HasColumnType("jsonb");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("ConnectedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("InterviewId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("MetadataJson")
-                        .HasColumnType("jsonb");
-
-                    b.Property<string>("Mode")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("ProviderConversationId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("TranscriptJson")
-                        .HasColumnType("jsonb");
-
-                    b.Property<Guid?>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InterviewId");
-
-                    b.HasIndex("ProviderConversationId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("agent_interview_sessions", "docprep");
-                });
-
             modelBuilder.Entity("DocPrep.Domain.Interviews.Allergy", b =>
                 {
                     b.Property<Guid>("Id")
@@ -317,41 +220,6 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                     b.ToTable("clarifications", "docprep");
                 });
 
-            modelBuilder.Entity("DocPrep.Domain.Interviews.ExternalWebhookEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ExternalEventId")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.Property<string>("PayloadHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTimeOffset?>("ProcessedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTimeOffset>("ReceivedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Provider", "ExternalEventId")
-                        .IsUnique();
-
-                    b.ToTable("external_webhook_events", "docprep");
-                });
-
             modelBuilder.Entity("DocPrep.Domain.Interviews.InterviewAnswer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -407,55 +275,6 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("interview_drafts", "docprep");
-                });
-
-            modelBuilder.Entity("DocPrep.Domain.Interviews.InterviewInvitation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("ConcurrencyVersion")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("FirstOpenedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("InterviewId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("MaxSessionCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("SessionCount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InterviewId");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique();
-
-                    b.ToTable("interview_invitations", "docprep");
                 });
 
             modelBuilder.Entity("DocPrep.Domain.Interviews.Medication", b =>
@@ -1116,29 +935,6 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("DocPrep.Domain.Interviews.AgentInterview", b =>
-                {
-                    b.HasOne("DocPrep.Domain.Visits.VisitProcess", null)
-                        .WithMany()
-                        .HasForeignKey("VisitProcessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("DocPrep.Domain.Interviews.AgentInterviewSession", b =>
-                {
-                    b.HasOne("DocPrep.Domain.Interviews.AgentInterview", null)
-                        .WithMany()
-                        .HasForeignKey("InterviewId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("DocPrep.Domain.Tenancy.StaffUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-                });
-
             modelBuilder.Entity("DocPrep.Domain.Interviews.Allergy", b =>
                 {
                     b.HasOne("DocPrep.Domain.Interviews.InterviewDraft", null)
@@ -1180,15 +976,6 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                     b.HasOne("DocPrep.Domain.Visits.VisitProcess", null)
                         .WithOne()
                         .HasForeignKey("DocPrep.Domain.Interviews.InterviewDraft", "VisitProcessId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("DocPrep.Domain.Interviews.InterviewInvitation", b =>
-                {
-                    b.HasOne("DocPrep.Domain.Interviews.AgentInterview", null)
-                        .WithMany()
-                        .HasForeignKey("InterviewId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

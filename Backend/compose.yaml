@@ -7,6 +7,10 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=docprep;Username=docprep;Password=${POSTGRES_PASSWORD:-docprep_dev}
       ConnectionStrings__Redis: redis:6379
+      ElevenLabs__ApiKey: ${ELEVENLABS_API_KEY:-}
+      ElevenLabs__AgentId: ${ELEVENLABS_AGENT_ID:-}
+      ElevenLabs__Environment: ${ELEVENLABS_ENVIRONMENT:-production}
+      ElevenLabs__WebhookSecret: ${ELEVENLABS_WEBHOOK_SECRET:-}
     ports:
       - "8080:8080"
     depends_on:

@@ -6,7 +6,8 @@ namespace DocPrep.Application.Contracts;
 
 public sealed record CreateVisitCommand(Guid FacilityId, string ExternalVisitId, string Pesel, DateTimeOffset ScheduledAt,
     DateTimeOffset ServiceExpiresAt, string Contact, ContactChannel Channel, string? AssignedClinicianId);
-public sealed record InvitationResult(Guid VisitId, string LinkToken, string VisitCode, string DeliveryStatus);
+public sealed record InvitationResult(Guid VisitId, string LinkToken, string VisitCode, string DeliveryStatus,
+    Guid InterviewId, string InterviewInvitationToken);
 public sealed record ExchangeAccessResult(string SessionToken, Guid VisitId, DateTimeOffset ExpiresAt);
 public sealed record AdminVisitView(Guid VisitId, string ExternalVisitId, DateTimeOffset ScheduledAt, VisitStatus Status,
     string DeliveryStatus, bool HasOpenSupplementationRound);
@@ -45,3 +46,12 @@ public sealed record ReportSupplementation(string Question, string Answer, strin
 public sealed record ClinicianReportView(ReportSnapshot Report, IReadOnlyList<ObservationEvidenceView> AvailableEvidence);
 public sealed record ObservationEvidenceView(Guid ObservationId, Guid SourceVisitId, Guid SourceVersionId, DateTimeOffset SourceDate, string SourceFragment);
 public sealed record DeletionRequestView(Guid RequestId, string Status, DateTimeOffset RequestedAt, DateTimeOffset? CompletedAt, string? LastError);
+public sealed record AgentInterviewView(Guid Id, string DisplayName, DateTimeOffset VisitDate, string Status, string InterviewType, int SessionCount);
+public sealed record AgentInterviewResultView(Guid Id, string Status, string? FinalReport, string? StructuredDataJson);
+public sealed record AgentSessionResult(Guid SessionId, string Mode, string Provider, string? ConversationToken, string? SignedUrl, string? ConversationId);
+public sealed record AgentInterviewAccess(Guid? VisitId, Guid? InterviewId, Guid? InvitationId, Guid? UserId)
+{
+    public static AgentInterviewAccess ForVisit(Guid visitId) => new(visitId, null, null, null);
+    public static AgentInterviewAccess ForInvitation(Guid interviewId, Guid invitationId) => new(null, interviewId, invitationId, null);
+}
+public sealed record InterviewInvitationAccess(Guid InterviewId, Guid InvitationId, DateTimeOffset ExpiresAt);

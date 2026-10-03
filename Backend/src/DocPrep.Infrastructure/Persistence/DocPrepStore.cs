@@ -30,6 +30,15 @@ internal sealed class DocPrepStore(DocPrepDbContext db) : IDocPrepStore
     public Task<int> CountRounds(Guid visitId, CancellationToken ct) => db.SupplementationRounds.CountAsync(x => x.VisitProcessId == visitId, ct);
     public Task<DeliveryAttempt?> GetLatestDelivery(Guid visitId, CancellationToken ct) => db.DeliveryAttempts.OrderByDescending(x => x.AttemptedAt).FirstOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
     public Task<Domain.Privacy.DeletionRequest?> GetDeletionRequest(Guid id, CancellationToken ct) => db.DeletionRequests.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<AgentInterview?> GetAgentInterview(Guid id, CancellationToken ct) => db.AgentInterviews.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<AgentInterview?> GetAgentInterviewByVisit(Guid visitId, CancellationToken ct) => db.AgentInterviews.SingleOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
+    public Task<AgentInterviewSession?> GetAgentInterviewSession(Guid id, CancellationToken ct) => db.AgentInterviewSessions.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<int> CountAgentInterviewSessions(Guid interviewId, CancellationToken ct) => db.AgentInterviewSessions.CountAsync(x => x.InterviewId == interviewId, ct);
+    public Task<AgentInterviewSession?> GetAgentSessionByConversation(string conversationId, CancellationToken ct) => db.AgentInterviewSessions.SingleOrDefaultAsync(x => x.ProviderConversationId == conversationId, ct);
+    public Task<InterviewInvitation?> FindInterviewInvitation(string tokenHash, CancellationToken ct) => db.InterviewInvitations.SingleOrDefaultAsync(x => x.TokenHash == tokenHash, ct);
+    public Task<InterviewInvitation?> GetInterviewInvitation(Guid id, CancellationToken ct) => db.InterviewInvitations.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public async Task<IReadOnlyList<InterviewInvitation>> GetInterviewInvitations(Guid interviewId, CancellationToken ct) => await db.InterviewInvitations.Where(x => x.InterviewId == interviewId).ToListAsync(ct);
+    public Task<ExternalWebhookEvent?> GetWebhookEvent(string provider, string externalEventId, CancellationToken ct) => db.ExternalWebhookEvents.SingleOrDefaultAsync(x => x.Provider == provider && x.ExternalEventId == externalEventId, ct);
     public void Add<T>(T entity) where T : class => db.Add(entity);
     public void Remove<T>(T entity) where T : class => db.Remove(entity);
     public Task Save(CancellationToken ct) => db.SaveChangesAsync(ct);
