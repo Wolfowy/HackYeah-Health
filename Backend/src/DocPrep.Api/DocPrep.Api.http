@@ -1,8 +1,11 @@
 @host = http://localhost:8080
 @adminKey = demo-admin-key
 @clinicianKey = demo-clinician-key
+@staffAccessToken = {{staffLogin.response.body.$.accessToken}}
+@staffRefreshToken = {{staffLogin.response.body.$.refreshToken}}
 
 ### Logowanie personelu administracyjnego
+# @name staffLogin
 POST {{host}}/api/v1/auth/login
 Content-Type: application/json
 
@@ -12,12 +15,12 @@ Content-Type: application/json
 }
 
 ### Kontekst zalogowanego użytkownika panelu
-@staffAccessToken = replace-me
 GET {{host}}/api/v1/auth/me
 Authorization: Bearer {{staffAccessToken}}
 
 ### Odnowienie sesji personelu (token jest rotowany)
-@staffRefreshToken = replace-me
+# Refresh token z logowania jest jednorazowy; przed powtórzeniem odnowienia
+# zaloguj się ponownie albo użyj refreshToken z odpowiedzi poprzedniego odnowienia.
 POST {{host}}/api/v1/auth/refresh
 Content-Type: application/json
 

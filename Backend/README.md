@@ -173,6 +173,10 @@ Panel konta pacjenta pozostaje demonstracją. Sesja pacjenta DocPrep może zosta
 
 ### Test endpointów agenta
 
+Nową rozmowę testową przygotujesz przez [elevenlabs-new-conversation.http](requests/elevenlabs-new-conversation.http): najpierw wyślij żądanie `0`, aby zalogować administrację danymi demo z tego README. JWT `accessToken` automatycznie autoryzuje tworzenie wizyty. Następnie utwórz wizytę, skopiuj `interviewInvitationToken` do linku `http://127.0.0.1:5173/i/{token}` i przeprowadź rozmowę w przeglądarce. Ten sam plik zawiera odczyt statusu oraz wyniku po zakończeniu rozmowy; daty i unikalny identyfikator wizyty generują się automatycznie. [Instrukcja krok po kroku](../docs/elevenlabs-uruchomienie.md#nowa-rozmowa-z-pliku-http).
+
+Do odczytania zapisanego wyniku rzeczywistej rozmowy użyj [elevenlabs-test.http](requests/elevenlabs-test.http). W VS Code z rozszerzeniem REST Client wklej `linkToken` z odpowiedzi tworzącej wizytę i wysyłaj żądania po kolei. Żądania `0a` i `0b` pobierają JWT administracji oraz lekarza. Token sesji pacjenta, `visitId` i `interviewId` także są pobierane automatycznie z odpowiedzi. JWT personelu autoryzuje endpointy placówki; odczyt wyniku samej rozmowy nadal wymaga sesji pacjenta. Kopię zawierającą prawdziwy token przechowuj w ignorowanym `Backend/.local/`. Szczegóły oceny wyniku: [sprawdzenie zapisu przez HTTP](../docs/elevenlabs-uruchomienie.md#sprawdzenie-zapisu-przez-plik-http).
+
 Testy domeny i dostawcy uruchamia `dotnet test DocPrep.sln`. Test pełnego API jest domyślnie pomijany bez izolowanej bazy PostgreSQL:
 
 ```sh

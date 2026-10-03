@@ -2,7 +2,7 @@
 
 Instrukcja dla aktualnego backendu **DocPrep** i frontendu **Przed wizytą**. Kod i dokumentację ElevenLabs sprawdzono 3 października 2026 r. [Dokument projektowy](elevenlabs-agent-integracja-front-back.md) opisuje założenia; poniżej znajduje się konfiguracja rzeczywiście zaimplementowanych endpointów.
 
-**Wniosek:** obsługa rozmowy z linku, głosu, czatu, webhooka i pobierania podsumowania jest zaimplementowana. Integracja całej aplikacji pozostaje częściowa: konto pacjenta jest demo, a wynik ElevenLabs nie jest jeszcze przenoszony do zatwierdzanego raportu DocPrep dla lekarza. Testy używają atrapy ElevenLabs; działanie na rzeczywistym koncie wymaga konfiguracji i próby opisanej w sekcji 8.
+**Wniosek:** obsługa rozmowy z linku, głosu, czatu, webhooka i pobierania podsumowania jest zaimplementowana. Integracja całej aplikacji pozostaje częściowa: konto pacjenta jest demo, a wynik ElevenLabs nie jest jeszcze przenoszony do zatwierdzanego raportu DocPrep dla lekarza. Testy automatyczne używają atrapy ElevenLabs. Lokalna próba z rzeczywistą rozmową głosową 3 października 2026 r. potwierdziła zapis transkrypcji, analizy i podsumowania przez podpisany webhook; szczegóły w sekcji 8.
 
 ## 1. Co oznacza „token” i gdzie go wpisać
 
@@ -57,7 +57,19 @@ Na koniec krótko podsumuj to, co powiedział pacjent, i zapytaj,
 czy chce coś poprawić lub dopisać. Podsumowanie ma służyć lekarzowi.
 ```
 
-Frontend przekazuje obecnie dynamic variables `language=pl` i `visit_type=wywiad przed wizytą`. Jeśli prompt korzysta ze zmiennych, ogranicz go do tych wartości albo dodaj obsługę innych w adapterze. Aktualny kod nie przekazuje specjalizacji, nazwiska lekarza ani danych osobowych pacjenta z backendu.
+Frontend przekazuje obecnie dynamic variables `language=pl` i `visit_type=wywiad przed wizytą`. Zmienna `language` nie nadpisuje ustawienia języka agenta: to wartość do wykorzystania w jego konfiguracji/promptcie. Jeśli prompt korzysta ze zmiennych, ogranicz go do tych wartości albo dodaj obsługę innych w adapterze. Aktualny kod nie przekazuje specjalizacji, nazwiska lekarza ani danych osobowych pacjenta z backendu.
+
+### Polski w panelu, angielski w rozmowie — wersja robocza agenta
+
+ElevenLabs rozdziela wersję roboczą od zapisanej wersji agenta. Sam polski język widoczny podczas edycji nie potwierdza, że rozmowy z aplikacji korzystają już z tej konfiguracji. Backend pobiera poświadczenia po `agent_id`, bez wskazania wersji roboczej.
+
+1. W panelu agenta otwórz **Versioning** i wybierz gałąź obsługującą rozmowy aplikacji.
+2. Zapisz zmiany jako nową wersję tej gałęzi. Jeżeli pracujesz na osobnej gałęzi, skonfiguruj jej udział w ruchu w **Deployments** albo przenieś zmiany do gałęzi używanej przez aplikację.
+3. Sprawdź, czy zapisany agent ma `conversation_config.agent.language: "pl"`, i rozpocznij nową rozmowę. Zmiana istniejącego agenta nie wymaga odtworzenia naszego API, jeśli `ELEVENLABS_AGENT_ID` pozostaje ten sam.
+
+Do porównania API służą `GET /v1/convai/agents/{agent_id}` i `GET /v1/convai/agents/{agent_id}?branch_id={branch_id}&include_draft=true`, z kluczem w nagłówku `xi-api-key`. Drugie żądanie obejmuje wersję roboczą użytkownika klucza na wybranej gałęzi. Podczas lokalnej diagnostyki ten sam agent zwrócił `en` w zapisanej wersji i `pl` z `include_draft=true` — to była przyczyna rozbieżności z panelem. Metadane rzeczywistej rozmowy potwierdziły `main_language: "en"`.
+
+Źródło: [wersje, wersje robocze i kierowanie ruchu w ElevenLabs](https://elevenlabs.io/docs/eleven-agents/operate/versioning).
 
 ### Analysis i Data collection
 
@@ -188,7 +200,22 @@ Pusty adres oznacza proxy / tę samą domenę. Przy osobnej domenie API ustaw je
 
 ### Utwórz testową wizytę
 
-W lokalnym Swaggerze wywołaj **`POST /api/v1/integration/visits`** z `X-Api-Key: demo-system-key`. Alternatywnie użyj poniższej komendy z Pythonem 3 i curl; tworzy fikcyjną wizytę za pięć dni:
+#### Nowa rozmowa z pliku HTTP
+
+Najwygodniej użyć [Backend/requests/elevenlabs-new-conversation.http](../Backend/requests/elevenlabs-new-conversation.http) w VS Code z [rozszerzeniem REST Client](https://github.com/Huachao/vscode-restclient). Backend, frontend oraz tunel webhooka powinny działać. Plik loguje administrację kontem `admin@docprep.local` z hasłem `DocPrepDemo!2026` i automatycznie używa JWT do utworzenia wizyty. Nie potrzebuje klucza ElevenLabs w edytorze.
+
+1. Wyślij żądanie **0 — pobranie JWT administracji**, następnie **1 — gotowość backendu** przez **Send Request**. Oczekiwane `200`. Token `accessToken` z logowania automatycznie trafia do `Authorization: Bearer …` w żądaniu tworzącym wizytę. Jeśli JWT wygaśnie, ponów żądanie 0.
+2. Wyślij **2 — utworzenie wizyty**. Oczekiwane `201` z `visitId`, `interviewId`, `interviewInvitationToken` i `linkToken`. `{{$guid}}` tworzy nowy identyfikator, a `{{$datetime iso8601 5 d}}` oraz `{{$datetime iso8601 7 d}}` ustawiają przyszły termin wizyty i ważność dostępu. Nie trzeba ręcznie zmieniać dat ani identyfikatora przed kolejnym testem.
+3. Opcjonalnie wyślij **3 — sprawdzenie zaproszenia**. Nowy wywiad powinien mieć `status: pending` i `sessionCount: 0`.
+4. Z odpowiedzi żądania 2 skopiuj **`interviewInvitationToken`** i otwórz w przeglądarce `http://127.0.0.1:5173/i/TU_WKLEJ_interviewInvitationToken`. Nie wstawiaj tam `linkToken`. Odpowiedz na pytania głosowo lub tekstowo i zakończ rozmowę przyciskiem w aplikacji. Wysyłanie zapytań HTTP nie uruchamia mikrofonu ani rozmowy SDK.
+5. Wróć do tego samego pliku i wyślij **4 — dostęp pacjenta**, następnie **5 — status** i **6 — wynik**. Tokeny i ID są pobierane automatycznie z nazwanych odpowiedzi, bez ręcznego kopiowania. Po analizie i webhooku oczekuj `status: completed`, przynajmniej jednej sesji oraz niepustego `finalReport`. Przy `processing` ponawiaj tylko odczyty 5–6.
+6. Aby rozpocząć kolejny test, ponownie wyślij **2** — utworzy nową wizytę, wywiad i zaproszenie. Zakończonego zaproszenia nie można użyć do nowej rozmowy. Po utworzeniu kolejnej wizyty żądania w tym pliku odnoszą się do niej; ponów również **4**, aby odnowić dostęp dla nowej wizyty.
+
+Zachowaj odpowiedź żądania 2 w ignorowanym `Backend/.local/`, jeśli chcesz wrócić do wyniku po restarcie edytora. Dla starszej rozmowy użyj [pliku diagnostycznego](../Backend/requests/elevenlabs-test.http) i wklej jej `linkToken`. Nie zapisuj surowych tokenów w plikach śledzonych przez Git. Automatyczne daty i odwołania do odpowiedzi opisuje [dokumentacja REST Client](https://github.com/Huachao/vscode-restclient#variables).
+
+#### Alternatywnie: Swagger lub curl
+
+W lokalnym Swaggerze wywołaj **`POST /api/v1/integration/visits`** z `X-Api-Key: demo-system-key`. Możesz też użyć poniższej komendy z Pythonem 3 i curl; tworzy fikcyjną wizytę za pięć dni:
 
 ```sh
 python3 - <<'PY' | curl --fail-with-body -sS \
@@ -258,7 +285,7 @@ sequenceDiagram
 | Login, avatar, profil i lista wizyt | Frontend demo; nie korzysta z rzeczywistego API konta pacjenta. Backendowe `/api/v1/auth/*` uwierzytelniają personel, nie konto pacjenta |
 | Raport dla lekarza                  | **Brak połączenia wyniku ElevenLabs z `InterviewDraft` → zatwierdzenie → zgoda → `ReportVersion` → odczyt lekarza**                      |
 | Powiadomienia SMS/e-mail            | Adapter demo, bez rzeczywistego dostawcy                                                                                                 |
-| Próba z prawdziwym ElevenLabs       | Nie wykonana podczas audytu: lokalnie brak skonfigurowanego klucza API, ID agenta i sekretu webhooka                                     |
+| Próba z prawdziwym ElevenLabs       | Lokalna rozmowa głosowa potwierdziła podpisany webhook i zapis transkrypcji, analizy oraz wyniku; sprawdzono też wydawanie poświadczeń głosu i czatu |
 
 Backend pobiera głosowy credential przez [GET `/v1/convai/conversation/token`](https://elevenlabs.io/docs/eleven-agents/api-reference/conversations/get-webrtc-token), a tekstowy przez [GET `/v1/convai/conversation/get-signed-url`](https://elevenlabs.io/docs/eleven-agents/api-reference/conversations/get-signed-url) z `include_conversation_id=true`. W obu przypadkach klucz trafia wyłącznie do nagłówka `xi-api-key` po stronie serwera. Frontend używa oficjalnego `@elevenlabs/client` wewnątrz hooka React.
 
@@ -275,6 +302,25 @@ Kod do sprawdzenia: [adapter API](../Frontend/src/lib/agent-api.ts), [cykl życi
 5. Zakończ rozmowę. W historii ElevenLabs sprawdź transkrypcję i analizę; w historii dostarczeń webhooka odpowiedź `200` naszego endpointu.
 6. Po analizie nasze `/result` powinno zwrócić `status: completed`, niepusty `finalReport` i `structuredDataJson`. Podsumowanie powinno pojawić się w UI. Jeśli przetwarzanie trwa ponad minutę, użyj „Sprawdź podsumowanie”.
 7. Otwórz ponownie link zakończonego wywiadu: start nowej rozmowy powinien być zablokowany.
+
+### Sprawdzenie zapisu przez plik HTTP
+
+Plik [Backend/requests/elevenlabs-test.http](../Backend/requests/elevenlabs-test.http) zawiera żądania diagnostyczne. Otwórz go w VS Code z [rozszerzeniem REST Client](https://github.com/Huachao/vscode-restclient), skopiuj do ignorowanego `Backend/.local/`, wstaw `linkToken` z odpowiedzi tworzącej wizytę i wysyłaj żądania po kolei przez **Send Request**. Żądanie **0a** pobiera JWT administracji do odczytu statusu wizyty; opcjonalne **0b** pobiera JWT lekarza do zapytania o udostępnione raporty. Oba korzystają z kont testowych z README. Nazwane odpowiedzi automatycznie dostarczają JWT, token sesji pacjenta i identyfikatory do następnych żądań. JWT personelu nie zastępuje sesji pacjenta przy odczycie wyniku ElevenLabs. Dla lokalnej wizyty testowej przygotowano już uzupełnioną kopię `Backend/.local/elevenlabs-test.http`; zawiera poświadczenie dostępu i nie trafia do Git.
+
+| Żądanie | Co potwierdza |
+|---|---|
+| `/health/ready` | HTTP `200`: PostgreSQL i Redis są dostępne |
+| `/patient-access/link/exchange` | HTTP `200`: uzyskana sesja pacjenta dla danej wizyty |
+| `/api/visits/{visitId}/interview` | Wywiad istnieje i jest przypisany do wizyty |
+| `/api/interviews/{interviewId}` | `status: completed` i `sessionCount >= 1`: zakończona rozmowa |
+| `/api/interviews/{interviewId}/result` | Niepusty `finalReport` i `structuredDataJson`: zapisany wynik analizy webhooka |
+| Status wizyty, draft i wersje dla lekarza | Osobny proces raportu DocPrep; jego brak nie unieważnia zapisu rozmowy |
+
+`structuredDataJson` jest stringiem zawierającym JSON ElevenLabs. Wartość `"{}"` oznacza brak wyodrębnionych pól; aby otrzymywać leki, objawy i inne dane, skonfiguruj **Analysis → Data collection**. `completed` potwierdza obsługę zakończenia, ale sam nie gwarantuje kompletności wywiadu ani osiągnięcia celu medycznego.
+
+Po zakończeniu rozmowy zaproszenie ElevenLabs staje się nieaktywne: `/api/public/interviews/{interviewInvitationToken}` i `/authorize` mogą zwrócić `409`. Do późniejszego odczytu użyj osobnego `linkToken`, a nie tokenu zaproszenia frontendu. Plik HTTP nie rozpoczyna dodatkowych sesji ElevenLabs ani nie wysyła sztucznego webhooka.
+
+API udostępnia wynik i liczbę sesji, ale nie ma obecnie endpointu GET pełnej transkrypcji ani historii webhooków. W lokalnej bazie sprawdzono również `docprep.agent_interview_sessions` i `docprep.external_webhook_events`: rzeczywista rozmowa głosowa miała zakończoną sesję, 3 wpisy transkrypcji, zapisane analysis oraz przetworzony `post_call_transcription`. Wynik API miał `status: completed` i niepuste podsumowanie, natomiast `structuredDataJson` zawierał `{}`. ElevenLabs zwrócił status rozmowy `done` i ocenę `call_successful: "success"`. Po dodaniu logowania JWT zweryfikowano wszystkie 10 żądań pliku diagnostycznego: 9 × `200` i `403` dla raportów lekarza bez zatwierdzenia oraz zgody. Sprawdzono także 7 żądań tworzenia nowej rozmowy: logowanie, utworzenie wizyty przez JWT (`201`), zaproszenie i odczyty przed rozpoczęciem rozmowy. Ten krótki test potwierdza przepływ zapisu, nie kompletność wywiadu. Nie utworzył automatycznie zgody ani raportu udostępnionego lekarzowi.
 
 Testy wykonane podczas audytu:
 

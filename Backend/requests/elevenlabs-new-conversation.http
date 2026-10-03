@@ -1,0 +1,76 @@
+# Nowa rozmowa testowa: VS Code + rozszerzenie REST Client.
+# Wyślij żądania 0–3 po kolei przez „Send Request”.
+# Po HTTP 201 z żądania 2 skopiuj interviewInvitationToken i otwórz:
+# http://127.0.0.1:5173/i/<interviewInvitationToken>
+# Rozmowę przeprowadź i zakończ w przeglądarce, następnie wyślij 4–6.
+# Każde ponowienie żądania 2 tworzy nową wizytę i nowe zaproszenie.
+# Zapisz odpowiedź 2 w Backend/.local/, jeśli chcesz wrócić do niej później.
+# Żądania nie uruchamiają płatnej sesji ElevenLabs; robi to frontend.
+
+@host = http://127.0.0.1:8080
+@staffAccessToken = {{testStaffLogin.response.body.$.accessToken}}
+@invitationToken = {{createTestVisit.response.body.$.interviewInvitationToken}}
+@interviewId = {{createTestVisit.response.body.$.interviewId}}
+@patientLinkToken = {{createTestVisit.response.body.$.linkToken}}
+@patientSession = {{testPatientAccess.response.body.$.sessionToken}}
+
+### 0. Pobierz JWT administracji — HTTP 200 (dane z Backend/README.md)
+# JWT jest automatycznie używany przy tworzeniu wizyty w żądaniu 2.
+# Po wygaśnięciu JWT ponów logowanie; domyślna ważność to 15 minut.
+# @name testStaffLogin
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@docprep.local",
+  "password": "DocPrepDemo!2026"
+}
+
+### 1. Gotowość lokalnego backendu — HTTP 200
+GET {{host}}/health/ready
+
+### 2. Utwórz nową fikcyjną wizytę i zaproszenie do rozmowy — HTTP 201
+# UUID oraz daty są generowane automatycznie przez REST Client.
+# Wizyta za 5 dni, dostęp ważny przez 7 dni.
+# @name createTestVisit
+POST {{host}}/api/v1/integration/visits
+Content-Type: application/json
+Authorization: Bearer {{staffAccessToken}}
+
+{
+  "externalVisitId": "eleven-http-test-{{$guid}}",
+  "pesel": "00000000000",
+  "scheduledAt": "{{$datetime iso8601 5 d}}",
+  "serviceExpiresAt": "{{$datetime iso8601 7 d}}",
+  "contact": "patient@example.invalid",
+  "channel": "Email",
+  "assignedClinicianId": "doctor-demo"
+}
+
+### 3. Sprawdź zaproszenie przed rozmową — HTTP 200
+# Oczekiwane: interview.status "pending", sessionCount 0.
+# Potem otwórz link opisany na początku pliku i przeprowadź rozmowę.
+# Po zakończeniu to żądanie zwróci 409 — jest to prawidłowe.
+GET {{host}}/api/public/interviews/{{invitationToken}}
+
+### 4. Uzyskaj dostęp do wyniku — HTTP 200, działa także po rozmowie
+# W razie wygaśnięcia sesji ponów tylko to żądanie, nie tworzenie wizyty.
+# @name testPatientAccess
+POST {{host}}/api/v1/patient-access/link/exchange
+Content-Type: application/json
+
+{ "token": "{{patientLinkToken}}" }
+
+### 5. Sprawdź status tej samej rozmowy — HTTP 200
+# Po skutecznym webhooku: status "completed", sessionCount >= 1.
+# Przed pierwszą rozmową: status "pending", sessionCount 0.
+GET {{host}}/api/interviews/{{interviewId}}
+Authorization: Bearer {{patientSession}}
+
+### 6. Sprawdź zapis podsumowania — HTTP 200
+# Po webhooku: status "completed" i niepusty finalReport.
+# structuredDataJson jest stringiem JSON; "{}" oznacza brak wyodrębnionych pól.
+# Jeśli status to "processing", poczekaj i ponów tylko żądania 5–6.
+# Przed rozmową finalReport i structuredDataJson są null.
+GET {{host}}/api/interviews/{{interviewId}}/result
+Authorization: Bearer {{patientSession}}

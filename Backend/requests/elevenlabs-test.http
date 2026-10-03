@@ -1,0 +1,85 @@
+# Diagnostyka zapisu rozmowy ElevenLabs w lokalnym backendzie.
+# Nową wizytę i link rozmowy utworzysz przez elevenlabs-new-conversation.http.
+# VS Code + REST Client: wysyłaj żądania po kolei przez „Send Request”.
+# Tokeny z nazwanych odpowiedzi są podstawiane automatycznie.
+# Wklej linkToken z odpowiedzi POST /api/v1/integration/visits.
+# To inny token niż interviewInvitationToken używany w URL frontendu.
+# Kopię z prawdziwym tokenem trzymaj w ignorowanym Backend/.local/.
+# Ten plik nie rozpoczyna ani nie kończy rozmów; POST-y służą logowaniu.
+
+@host = http://127.0.0.1:8080
+@patientLinkToken = REPLACE_WITH_linkToken
+@adminAccessToken = {{diagnosticAdminLogin.response.body.$.accessToken}}
+@clinicianAccessToken = {{diagnosticClinicianLogin.response.body.$.accessToken}}
+@patientSession = {{patientAccess.response.body.$.sessionToken}}
+@visitId = {{patientAccess.response.body.$.visitId}}
+@interviewId = {{visitInterview.response.body.$.id}}
+
+### 0a. Pobierz JWT administracji — HTTP 200 (dane z Backend/README.md)
+# Uruchom przed żądaniem 6; po wygaśnięciu JWT ponów logowanie.
+# @name diagnosticAdminLogin
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@docprep.local",
+  "password": "DocPrepDemo!2026"
+}
+
+### 0b. Opcjonalnie: pobierz JWT lekarza — HTTP 200
+# Uruchom przed opcjonalnym żądaniem 8.
+# @name diagnosticClinicianLogin
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "doctor@docprep.local",
+  "password": "DocPrepDemo!2026"
+}
+
+### 1. PostgreSQL i Redis — oczekiwane HTTP 200
+GET {{host}}/health/ready
+
+### 2. Dostęp pacjenta, również po zakończeniu rozmowy — HTTP 200
+# Uruchom przed dalszymi zapytaniami; ponów, jeśli sesja wygasła.
+# @name patientAccess
+POST {{host}}/api/v1/patient-access/link/exchange
+Content-Type: application/json
+
+{ "token": "{{patientLinkToken}}" }
+
+### 3. Wywiad przypisany do wizyty — HTTP 200
+# @name visitInterview
+GET {{host}}/api/visits/{{visitId}}/interview
+Authorization: Bearer {{patientSession}}
+
+### 4. Status rozmowy — HTTP 200, status "completed", sessionCount >= 1
+GET {{host}}/api/interviews/{{interviewId}}
+Authorization: Bearer {{patientSession}}
+
+### 5. Zapisany wynik webhooka — HTTP 200
+# Sukces: status "completed", niepusty finalReport i structuredDataJson.
+# structuredDataJson jest tekstem zawierającym JSON dostawcy; "{}" oznacza
+# brak wyodrębnionych pól, a nie automatycznie błąd zapisu.
+# "processing": analiza/webhook jeszcze trwa; powtórz to żądanie.
+GET {{host}}/api/interviews/{{interviewId}}/result
+Authorization: Bearer {{patientSession}}
+
+### 6. Status procesu wizyty — HTTP 200 (JWT administracji)
+# Ten status jest osobny od statusu rozmowy; InProgress może być prawidłowy
+# nawet gdy wywiad ElevenLabs jest już completed.
+GET {{host}}/api/v1/integration/visits/{{visitId}}/status
+Authorization: Bearer {{adminAccessToken}}
+
+### 7. Opcjonalnie: wersja robocza raportu DocPrep — HTTP 200
+# Webhook ElevenLabs nie uzupełnia jeszcze tego modelu automatycznie.
+# Pusty draft / latestVersion null / consentActive false nie oznacza,
+# że rozmowa nie została zapisana. Jej wynik sprawdza żądanie 5.
+GET {{host}}/api/v1/interview
+Authorization: Bearer {{patientSession}}
+
+### 8. Opcjonalnie: raport udostępniony lekarzowi
+# HTTP 403 jest oczekiwane, dopóki nie ma zatwierdzonego raportu i zgody.
+# To osobny proces od zapisu wyniku ElevenLabs.
+GET {{host}}/api/v1/integration/visits/{{visitId}}/report-versions
+Authorization: Bearer {{clinicianAccessToken}}
