@@ -26,34 +26,33 @@ E2E używa zainstalowanego Chrome i sprawdza komputer oraz telefon. Transport SD
 
 ## Ekrany i linki
 
-| Adres                         | Zachowanie                                                                                         |
-| ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| `/`                           | Panel demo: wywiad, wizyta, edytowalny raport; po logowaniu lista wizyt, profil i dodatkowy opis.  |
-| `/i/demo-appointment-1`       | Sama rozmowa demo dla pierwszej wizyty, bez sidebaru i kart.                                       |
-| `/i/demo-appointment-2`       | Sama rozmowa demo dla drugiej wizyty.                                                              |
-| `/i/{token}`                  | Rzeczywiste zaproszenie: walidacja backendu, wymiana na sesję ograniczoną do jednego wywiadu.      |
-| `/visits/{visitId}/interview` | Rozmowa przez API pacjenta. Wymaga uwierzytelnienia serwerowego albo lokalnego mostka Development. |
-| `/rozmowa`                    | Adres po wymianie tokenu zaproszenia. Odświeżenie wymaga ponownego otwarcia otrzymanego linka.     |
+| Adres                         | Zachowanie                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `/`                           | Panel demo: wywiad, wizyta, edytowalny raport; po logowaniu lista wizyt, profil i dodatkowy opis. |
+| `/i/demo-appointment-1`       | Sama rozmowa demo dla pierwszej wizyty, bez sidebaru i kart.                                      |
+| `/i/demo-appointment-2`       | Sama rozmowa demo dla drugiej wizyty.                                                             |
+| `/i/{token}`                  | Rzeczywiste zaproszenie: walidacja backendu, wymiana na sesję ograniczoną do jednego wywiadu.     |
+| `/visits/{visitId}/interview` | Rozmowa przez API pacjenta. Wymaga sesji pacjenta DocPrep dostarczonej przez aplikację nadrzędną. |
+| `/rozmowa`                    | Adres po wymianie tokenu zaproszenia. Odświeżenie wymaga ponownego otwarcia otrzymanego linka.    |
 
 Token zaproszenia po autoryzacji znika z URL. Sesja aplikacyjna i tymczasowy credential ElevenLabs są tylko w pamięci. `Referrer-Policy` ustawiono przez meta na `no-referrer`. Na hostingu należy ustawić fallback tras do `index.html` i nie zapisywać tokenów z adresów zaproszeń w logach dostępu ani analityce.
 
 ## ElevenLabs i backend
 
-Instrukcja serwerowa: [Backend/README.md](../Backend/README.md). Utwórz wizytę, potem `POST /api/v1/integration/appointments/{visitId}/invitation`. Zwrócony `invitationUrl` otwórz na domenie frontendu.
+Instrukcja serwerowa: [Backend/README.md](../Backend/README.md). Placówka tworzy wizytę przez `POST /api/v1/integration/visits`. Zwrócony `interviewInvitationToken` służy do zbudowania adresu `/i/{token}` na domenie frontendu. Wymiana zaproszenia zwraca anonimowy JWT i `interviewId`; kolejne żądania trafiają do `/api/interviews/{interviewId}/sessions` i `/result`.
 
 Opcjonalnie skopiuj `.env.example` do `.env.local`:
 
 ```dotenv
 VITE_API_BASE_URL=
-VITE_DEVELOPMENT_PATIENT_ID=patient-001
 ```
 
-Pusty adres API używa proxy / tej samej domeny. `VITE_DEVELOPMENT_PATIENT_ID` działa tylko z backendem w Development i służy do testowania ścieżki pacjenta. Logowanie demo nie jest uwierzytelnieniem backendu. Produkcyjne logowanie OIDC i podłączenie listy wizyt/profilu do API pozostają do wdrożenia. Nigdy nie dodawaj klucza ElevenLabs do zmiennych `VITE_*`.
+Pusty adres API używa proxy / tej samej domeny. Nie ma mostka `X-Patient-Id`. Aplikacja nadrzędna może przekazać sesję pacjenta otrzymaną z `/api/v1/patient-access/link/exchange` lub `/code/exchange` przez `agentApi.setPatientSession(token)`; adapter przechowuje ją w pamięci i wysyła jako bearer token. Przy bezpośrednim otwarciu ścieżki wizyty bez takiej sesji serwer odmówi dostępu. Logowanie demo, lista wizyt i profil nie są jeszcze podłączone do API. Uwierzytelnienie JWT personelu backendu jest osobnym mechanizmem. Nigdy nie dodawaj klucza ElevenLabs do zmiennych `VITE_*`.
 
 - Głos: kliknięcie mikrofonu → zgoda na mikrofon → backend wydaje `conversationToken` → SDK zestawia WebRTC. Stany połączenia, mówienia, słuchania i wyciszenia sterują sferą. Zakończenie i opuszczenie ekranu zamykają transport SDK.
 - Tekst: backend wydaje `signedUrl` → SDK używa WebSocket z `textOnly: true`; mikrofon nie jest potrzebny. Enter wysyła, Shift+Enter dodaje linię.
 - Zmiana trybu: poprzedni transport jest zamykany i oznaczany jako kontynuacja wywiadu; historia pozostaje widoczna i trafia do nowej sesji jako kontekst. Każde rozpoczęcie zużywa jedną z maksymalnie trzech sesji zaproszenia.
-- Wynik: backend zapisuje podpisany webhook. UI odpytuje wynik przez minutę i pozwala sprawdzić go ponownie. Nie tworzy lokalnie raportu z rozmowy ElevenLabs ani nie przekazuje go automatycznie placówce.
+- Wynik: backend zapisuje podpisany webhook. Adapter mapuje `finalReport` i `structuredDataJson` na model UI. Interfejs odpytuje wynik przez minutę i pozwala sprawdzić go ponownie. Nie tworzy lokalnie raportu z rozmowy ElevenLabs ani nie przekazuje go automatycznie placówce.
 - Błędne, wygasłe, unieważnione lub ukończone zaproszenie blokuje uruchomienie SDK. Brak mikrofonu pozwala przejść do tekstu.
 
 Implementację zweryfikowano z [dokumentacją JavaScript SDK](https://elevenlabs.io/docs/eleven-agents/libraries/java-script). `Conversation.startSession()` zwraca instancję; identyfikator odczytujemy przez `getId()`.

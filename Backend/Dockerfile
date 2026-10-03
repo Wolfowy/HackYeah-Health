@@ -1,20 +1,19 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+﻿FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY HealthPrep.sln ./
-COPY src/HealthPrep.Domain/HealthPrep.Domain.csproj src/HealthPrep.Domain/
-COPY src/HealthPrep.Application/HealthPrep.Application.csproj src/HealthPrep.Application/
-COPY src/HealthPrep.Infrastructure/HealthPrep.Infrastructure.csproj src/HealthPrep.Infrastructure/
-COPY src/HealthPrep.Api/HealthPrep.Api.csproj src/HealthPrep.Api/
-COPY tests/HealthPrep.UnitTests/HealthPrep.UnitTests.csproj tests/HealthPrep.UnitTests/
-RUN dotnet restore HealthPrep.sln
+COPY DocPrep.sln ./
+COPY src/DocPrep.Domain/DocPrep.Domain.csproj src/DocPrep.Domain/
+COPY src/DocPrep.Application/DocPrep.Application.csproj src/DocPrep.Application/
+COPY src/DocPrep.Infrastructure/DocPrep.Infrastructure.csproj src/DocPrep.Infrastructure/
+COPY src/DocPrep.Api/DocPrep.Api.csproj src/DocPrep.Api/
+COPY tests/DocPrep.UnitTests/DocPrep.UnitTests.csproj tests/DocPrep.UnitTests/
+RUN dotnet restore DocPrep.sln
 COPY . .
-RUN dotnet publish src/HealthPrep.Api/HealthPrep.Api.csproj -c Release -o /app --no-restore
+RUN dotnet publish src/DocPrep.Api/DocPrep.Api.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app .
-RUN mkdir -p /app/access-keys && chown "$APP_UID" /app/access-keys && chmod 700 /app/access-keys
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 USER $APP_UID
-ENTRYPOINT ["dotnet", "HealthPrep.Api.dll"]
+ENTRYPOINT ["dotnet", "DocPrep.Api.dll"]

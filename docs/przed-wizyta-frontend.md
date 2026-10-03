@@ -18,7 +18,7 @@ Panel, logowanie, profil i edycja raportów korzystają obecnie z danych demonst
 
 Adres `/i/{token}` otwiera ekran zawierający wyłącznie rozmowę oraz podstawowy kontekst terminu wizyty. Nie ma bocznej nawigacji, profilu ani listy pozostałych wizyt.
 
-Backend sprawdza zaproszenie i wymienia jego token na krótką sesję aplikacyjną ograniczoną do jednego wywiadu. Frontend usuwa token zaproszenia z adresu i przechodzi na `/rozmowa`. Sesja pozostaje w pamięci strony; po odświeżeniu należy ponownie otworzyć otrzymany link. Nieprawidłowe, wygasłe, unieważnione lub ukończone zaproszenie blokuje uruchomienie agenta.
+Backend DocPrep sprawdza zaproszenie i wymienia jego token na anonimowy JWT ograniczony do jednego wywiadu. Odpowiedź zawiera także `interviewId`, używany w kolejnych żądaniach. Frontend usuwa token zaproszenia z adresu i przechodzi na `/rozmowa`. Sesja pozostaje w pamięci strony; po odświeżeniu należy ponownie otworzyć otrzymany link. Nieprawidłowe, wygasłe, unieważnione lub ukończone zaproszenie blokuje uruchomienie agenta.
 
 ## Dostępne adresy
 
@@ -38,7 +38,7 @@ Backend sprawdza zaproszenie i wymienia jego token na krótką sesję aplikacyjn
 3. Backend tworzy sesję i wydaje tymczasowy credential ElevenLabs. Klucz API dostawcy pozostaje na serwerze.
 4. Oficjalny SDK zestawia WebRTC dla głosu lub WebSocket z `textOnly: true` dla tekstu. Wiadomości pojawiają się w interfejsie, a poziom audio steruje sferą.
 5. Frontend potwierdza identyfikator rozmowy dostawcy. Przełączenie trybu zamyka poprzedni transport i rozpoczyna kolejną sesję, przekazując historię jako kontekst.
-6. Po zakończeniu połączenia UI pokazuje przetwarzanie. Backend odbiera i weryfikuje podpisany webhook, zapisuje transkrypcję, analizę i podsumowanie.
+6. Po zakończeniu połączenia UI pokazuje przetwarzanie. Backend odbiera i weryfikuje podpisany webhook, zapisuje transkrypcję, analizę i podsumowanie. Przy zmianie trybu poprzednia sesja jest wcześniej oznaczana jako kontynuacja, aby jej webhook nie zakończył całego wywiadu.
 7. Frontend odpytuje wynik przez minutę; później można odświeżyć go przyciskiem. Sam koniec połączenia nie oznacza zatwierdzenia ani udostępnienia raportu placówce.
 
 Rozmowa rozróżnia stany oczekiwania, prośby o mikrofon, łączenia, aktywnego połączenia, wyciszenia, kończenia, przetwarzania, ukończenia i błędu. Brak zgody na mikrofon pozwala kontynuować tekstowo. Opuszczenie ekranu zamyka transport SDK. Każda nowa sesja, także po zmianie trybu, zużywa jedno rozpoczęcie z limitu zaproszenia.
@@ -82,7 +82,7 @@ npm ci
 npm run dev
 ```
 
-Frontend działa pod `http://127.0.0.1:5173`. Lokalne proxy `/api` wskazuje na backend pod `http://127.0.0.1:8080`. Opcjonalny adres API i mostek tożsamości Development opisuje `Frontend/.env.example`; konfiguracja ElevenLabs należy wyłącznie do backendu.
+Frontend działa pod `http://127.0.0.1:5173`. Lokalne proxy `/api` wskazuje na backend pod `http://127.0.0.1:8080`. Opcjonalny adres API opisuje `Frontend/.env.example`; konfiguracja ElevenLabs należy wyłącznie do backendu. Ścieżka `/visits/{visitId}/interview` wymaga sesji pacjenta DocPrep przekazanej przez aplikację nadrzędną metodą `agentApi.setPatientSession(token)`. Nie używa nagłówka `X-Patient-Id`.
 
 ```sh
 npm run build
@@ -95,6 +95,6 @@ Testy obejmują reguły raportu i zgód, kontrakt API, linki zaproszeń, widoki 
 
 ## Obecne granice integracji
 
-Rzeczywiste rozmowy z linka mają adapter SDK i backend zapisujący wynik. Do uruchomienia wymagają skonfigurowanego agenta, kluczy serwerowych i dostępnego webhooka HTTPS. Wynik AI jest prezentowany jako podsumowanie z backendu; nie jest jeszcze podłączony do edycji, zatwierdzania i udostępniania przez dotychczasowy panel. Produkcyjne logowanie OIDC oraz podłączenie listy wizyt i profilu do API pozostają do wdrożenia.
+Rzeczywiste rozmowy z linka mają adapter SDK i backend zapisujący wynik. Do uruchomienia wymagają skonfigurowanego agenta, kluczy serwerowych i dostępnego webhooka HTTPS. Adapter odczytuje `finalReport` i parsuje `structuredDataJson`. Wynik AI nie jest jeszcze podłączony do edycji, zatwierdzania i udostępniania przez dotychczasowy panel. Logowanie panelu pacjenta, lista wizyt i profil pozostają demonstracją. Backend ma osobne logowanie JWT dla personelu, niepodłączone do tego interfejsu.
 
 Szczegóły konfiguracji: [README frontendu](../Frontend/README.md), [README backendu](../Backend/README.md) i [założenia integracji ElevenLabs](elevenlabs-agent-integracja-front-back.md).

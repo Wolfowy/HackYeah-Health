@@ -1,6 +1,7 @@
 import type { ConversationMode } from '../models'
 
 export interface AgentInterviewInfo {
+  id: string
   displayName: string
   visitDate: string
   status: 'pending' | 'in_progress' | 'processing' | 'completed'
@@ -11,7 +12,8 @@ export interface AgentResult {
   structuredData: Record<string, unknown> | null
 }
 export type AgentAccess =
-  { kind: 'anonymous'; accessToken: string } | { kind: 'patient'; interviewId: string }
+  | { kind: 'anonymous'; accessToken: string; interviewId: string }
+  | { kind: 'patient'; interviewId: string }
 export type AgentCredential = {
   sessionId: string
   provider: 'elevenlabs'
@@ -21,14 +23,21 @@ export type AgentCredential = {
 } & ({ mode: 'voice'; conversationToken: string } | { mode: 'text'; signedUrl: string })
 
 export class AgentApiError extends Error {
-  constructor(public status: number) {
+  constructor(
+    public status: number,
+    public code?: string,
+  ) {
     super(
       status === 401 || status === 403
         ? 'Nie masz dostępu do tej rozmowy. Otwórz ponownie link otrzymany od placówki.'
         : status === 404
           ? 'Nie znaleziono rozmowy. Sprawdź otrzymany link.'
-          : status === 410
-            ? 'Ten link wygasł lub został unieważniony. Poproś placówkę o nowy.'
+          : status === 410 ||
+              (status === 409 &&
+                (code?.startsWith('agent_invitation.') ||
+                  code === 'agent_interview.inactive' ||
+                  code === 'visit.inactive'))
+            ? 'Ta rozmowa jest zakończona albo link wygasł lub został unieważniony. Poproś placówkę o nowy.'
             : status === 429
               ? 'Wykorzystano limit rozpoczęć rozmowy. Spróbuj później lub poproś placówkę o nowy link.'
               : status === 503
@@ -43,8 +52,13 @@ export class AgentApi {
   constructor(
     private baseUrl = import.meta.env?.VITE_API_BASE_URL ?? '',
     private fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
-    private developmentPatientId = import.meta.env?.VITE_DEVELOPMENT_PATIENT_ID ?? '',
+    private patientSessionToken = '',
   ) {}
+
+  /** The host can supply a patient session returned by DocPrep's link/code exchange. */
+  setPatientSession(token: string) {
+    this.patientSessionToken = token
+  }
 
   private async request<T>(
     path: string,
@@ -56,15 +70,15 @@ export class AgentApi {
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (access?.kind === 'anonymous') headers.Authorization = `Bearer ${access.accessToken}`
-    else if (access?.kind === 'patient' && this.developmentPatientId)
-      headers['X-Patient-Id'] = this.developmentPatientId
+    else if (access?.kind === 'patient' && this.patientSessionToken)
+      headers.Authorization = `Bearer ${this.patientSessionToken}`
     const timeout = AbortSignal.timeout(15000)
     let response: Response
     try {
       response = await this.fetcher(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
         method,
         headers,
-        credentials: 'include',
+        credentials: 'omit',
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       })
@@ -72,7 +86,10 @@ export class AgentApi {
       if (signal?.aborted) throw cause
       throw new Error('Nie udało się połączyć z serwerem. Sprawdź połączenie i spróbuj ponownie.')
     }
-    if (!response.ok) throw new AgentApiError(response.status)
+    if (!response.ok) {
+      const problem = (await response.json().catch(() => null)) as { code?: string } | null
+      throw new AgentApiError(response.status, problem?.code)
+    }
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
   }
@@ -86,30 +103,35 @@ export class AgentApi {
       'GET',
       signal,
     )
-    const { accessToken } = await this.request<{ accessToken: string; expiresIn: number }>(
-      `${path}/authorize`,
-      undefined,
-      {},
-      'POST',
-      signal,
-    )
-    return { interview, access: { kind: 'anonymous', accessToken } as AgentAccess }
+    const { accessToken, interviewId } = await this.request<{
+      accessToken: string
+      expiresIn: number
+      interviewId: string
+    }>(`${path}/authorize`, undefined, {}, 'POST', signal)
+    if (!accessToken || !interviewId) throw new AgentApiError(502)
+    return { interview, access: { kind: 'anonymous', accessToken, interviewId } as AgentAccess }
   }
   async getVisitInterview(visitId: string, signal?: AbortSignal) {
-    return this.request<{ interviewId: string; interview: AgentInterviewInfo }>(
+    const interview = await this.request<AgentInterviewInfo>(
       `/api/visits/${encodeURIComponent(visitId)}/interview`,
       { kind: 'patient', interviewId: '' },
       undefined,
       'GET',
       signal,
     )
+    return { interviewId: interview.id, interview }
   }
-  startSession(access: AgentAccess, mode: ConversationMode, signal?: AbortSignal) {
-    const path =
-      access.kind === 'anonymous'
-        ? '/api/interview/sessions'
-        : `/api/interviews/${encodeURIComponent(access.interviewId)}/sessions`
-    return this.request<AgentCredential>(path, access, { mode }, 'POST', signal)
+  async startSession(access: AgentAccess, mode: ConversationMode, signal?: AbortSignal) {
+    const path = `/api/interviews/${encodeURIComponent(access.interviewId)}/sessions`
+    const credential = await this.request<AgentCredential>(path, access, { mode }, 'POST', signal)
+    return {
+      ...credential,
+      userId: credential.userId ?? `anon_${credential.sessionId.replace(/-/g, '')}`,
+      dynamicVariables: credential.dynamicVariables ?? {
+        language: 'pl',
+        visit_type: 'wywiad przed wizytą',
+      },
+    }
   }
   bindConversation(
     access: AgentAccess,
@@ -133,12 +155,18 @@ export class AgentApi {
       'POST',
     )
   }
-  getResult(access: AgentAccess, signal?: AbortSignal) {
-    const path =
-      access.kind === 'anonymous'
-        ? '/api/interview/result'
-        : `/api/interviews/${encodeURIComponent(access.interviewId)}/result`
-    return this.request<AgentResult>(path, access, undefined, 'GET', signal)
+  async getResult(access: AgentAccess, signal?: AbortSignal): Promise<AgentResult> {
+    const path = `/api/interviews/${encodeURIComponent(access.interviewId)}/result`
+    const result = await this.request<{
+      status: AgentInterviewInfo['status']
+      finalReport: string | null
+      structuredDataJson: string | null
+    }>(path, access, undefined, 'GET', signal)
+    return {
+      status: result.status,
+      summary: result.finalReport,
+      structuredData: result.structuredDataJson ? JSON.parse(result.structuredDataJson) : null,
+    }
   }
 }
 

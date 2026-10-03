@@ -136,10 +136,10 @@ test('wygasły link blokuje uruchomienie agenta', async ({ page }) => {
   let sessionRequests = 0
   await page.route('**/api/**', async (route) => {
     if (route.request().url().includes('/sessions')) sessionRequests++
-    await route.fulfill({ status: 410, json: {} })
+    await route.fulfill({ status: 409, json: { code: 'agent_invitation.inactive' } })
   })
   await page.goto('/i/expired-token')
-  await expect(page.getByRole('alert')).toContainText('Ten link wygasł')
+  await expect(page.getByRole('alert')).toContainText('link wygasł')
   await expect(page.getByRole('button', { name: 'Rozpocznij rozmowę', exact: true })).toHaveCount(0)
   expect(sessionRequests).toBe(0)
 })
@@ -160,12 +160,15 @@ test('prawdziwy link wymienia token i pokazuje błąd backendu bez żądania mik
     const path = new URL(request.url()).pathname
     calls.push({ path, body: request.postData(), authorization: request.headers().authorization })
     if (path.endsWith('/authorize'))
-      await route.fulfill({ json: { accessToken: 'scoped-test-token', expiresIn: 3600 } })
+      await route.fulfill({
+        json: { accessToken: 'scoped-test-token', expiresIn: 3600, interviewId: 'interview-1' },
+      })
     else if (path.endsWith('/sessions')) await route.fulfill({ status: 503, json: {} })
     else
       await route.fulfill({
         json: {
           interview: {
+            id: 'interview-1',
             displayName: 'Wywiad przed wizytą',
             visitDate: '2026-12-10T10:00:00Z',
             status: 'pending',
@@ -179,7 +182,7 @@ test('prawdziwy link wymienia token i pokazuje błąd backendu bez żądania mik
   await page.getByRole('button', { name: 'Czat', exact: true }).click()
   await page.getByRole('button', { name: 'Rozpocznij czat', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Rozmowa jest chwilowo niedostępna')
-  const session = calls.find((call) => call.path === '/api/interview/sessions')
+  const session = calls.find((call) => call.path === '/api/interviews/interview-1/sessions')
   expect(session?.authorization).toBe('Bearer scoped-test-token')
   expect(JSON.parse(session!.body!)).toEqual({ mode: 'text' })
 })

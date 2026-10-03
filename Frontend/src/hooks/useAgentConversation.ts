@@ -90,13 +90,13 @@ export function useAgentConversation(access: AgentAccess) {
     abort.current = controller
     setError('')
     try {
-      if (sdk.current) {
-        await sdk.current.endSession()
-        sdk.current = null
-      }
       if (sessionId.current) {
         await agentApi.endSession(access, sessionId.current, true)
         sessionId.current = null
+      }
+      if (sdk.current) {
+        await sdk.current.endSession()
+        sdk.current = null
       }
       setMode(nextMode)
       setMuted(false)

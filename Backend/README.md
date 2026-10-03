@@ -1,133 +1,157 @@
-# HealthPrep Backend
+﻿# DocPrep Backend
 
-Modularny monolit w ASP.NET Core 8, zaprojektowany tak, aby reguły biznesowe oraz integracje z AI, bazą i generatorem PDF można było wymieniać niezależnie.
+Modularny backend ASP.NET Core 8 realizujący procesy P-01–P-08 z dokumentacji projektu.
 
-## Architektura
+## Stack i moduły
 
-- `HealthPrep.Domain` — agregat wizyty, zgody, statusy, deadline edycji i wersjonowanie.
-- `HealthPrep.Application` — przypadki użycia, kontrakty repozytorium, generatora pytań i PDF.
-- `HealthPrep.Infrastructure` — EF Core + PostgreSQL, Redis, adaptacyjny silnik pytań i PDF.
-- `HealthPrep.Api` — wersjonowane Minimal API, OpenAPI, izolacja tenantów i obsługa błędów.
-- `HealthPrep.UnitTests` — testy niezmienników domenowych.
+- ASP.NET Core Minimal API i OpenAPI,
+- EF Core z PostgreSQL oraz jawnymi migracjami,
+- Redis dla krótkotrwałych sesji pacjenta,
+- JWT access token oraz rotowany refresh token dla użytkowników panelu,
+- QuestPDF dla raportów z polskimi znakami,
+- Docker Compose dla API, PostgreSQL i Redis.
 
-PostgreSQL jest źródłem prawdy. Redis jest zarejestrowany jako rozproszony cache i może służyć do statusów, sesji oraz rate limiting bez zmiany domeny. `IInterviewQuestionProvider` jest celowo abstrakcją: obecny deterministyczny provider można zastąpić adapterem LLM bez ingerencji w przypadki użycia.
+Solution zawiera `DocPrep.Domain`, `DocPrep.Application`, `DocPrep.Infrastructure`, `DocPrep.Api` i testy. Model rozdziela proces wizyty, hashowane linki/kody, wersję roboczą, obserwacje, niezmienne wersje raportu, zgody i rundy uzupełniające.
 
 ## Uruchomienie
-
-W katalogu `Backend`:
 
 ```bash
 docker compose up --build
 ```
 
-API: `http://localhost:8080`, Swagger: `http://localhost:8080/swagger`, health check: `http://localhost:8080/health`.
+- API: `http://localhost:8080`
+- Swagger w Development: `http://localhost:8080/swagger`
+- liveness: `http://localhost:8080/health/live`
+- readiness: `http://localhost:8080/health/ready`
 
-Demo integracji używa nagłówka `X-Api-Key: demo-clinic-key`. Endpointy pacjenta używają tymczasowego nagłówka `X-Patient-Id`; przed produkcją należy podmienić go na identyfikator `sub` z firmowego OIDC/OAuth2. Klucze produkcyjne należy przekazywać przez secrets manager, nie przez `appsettings.json`.
+## Uwierzytelnianie i autoryzacja
 
-## Najważniejsze przepływy
+Backend rozdziela trzy rodzaje poświadczeń:
 
-1. Placówka tworzy wizytę: `POST /api/v1/integration/appointments`.
-2. Pacjent odpowiada: `POST /api/v1/patient/appointments/{id}/answers` (tekst lub transkrypcja głosu).
-3. Pacjent edytuje dane: `PUT /api/v1/patient/appointments/{id}/summary`.
-4. Pacjent zatwierdza wersję i nadaje zgodę: `POST .../approve`, następnie `PUT .../consent`.
-5. Placówka pobiera zatwierdzony JSON/PDF dopiero po zgodzie.
-6. Lekarz może przesłać pytanie uzupełniające; wcześniejsze wersje pozostają zachowane.
+- pacjent: opaque bearer token ograniczony do jednej wizyty i przechowywany w Redisie,
+- użytkownik panelu: krótkotrwały JWT oraz jednorazowo rotowany refresh token,
+- system placówki: `X-Api-Key`, wyłącznie do komunikacji serwer–serwer.
 
-Przykład utworzenia wizyty:
+Konta demonstracyjne panelu, tworzone tylko w środowisku `Development`:
 
-```bash
-curl -X POST http://localhost:8080/api/v1/integration/appointments \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: demo-clinic-key" \
-  -d '{"externalAppointmentId":"visit-001","externalPatientId":"patient-001","scheduledAt":"2026-12-10T10:00:00Z","consultationReason":"Recurring headache"}'
+| Rola | Login | Hasło |
+|---|---|---|
+| Administracja | `admin@docprep.local` | `DocPrepDemo!2026` |
+| Lekarz | `doctor@docprep.local` | `DocPrepDemo!2026` |
+
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "admin@docprep.local", "password": "DocPrepDemo!2026" }
 ```
 
-## Decyzje pod dalszy rozwój
+Frontend używa `accessToken` jako `Authorization: Bearer ...`. Odnowienie i wylogowanie realizują odpowiednio `/api/v1/auth/refresh` i `/api/v1/auth/logout`; `/api/v1/auth/me` zwraca bieżącego użytkownika wraz z rolą i placówką. Access token żyje domyślnie 15 minut, refresh token 7 dni i jest rotowany przy każdym użyciu.
 
-- Każda placówka ma `TenantId`; zapytania integracyjne nigdy nie zwracają danych obcego tenantu.
-- Raport placówki wymaga jednocześnie zatwierdzonego statusu i aktualnej zgody pacjenta.
-- Snapshoty JSON są niezmienne i wersjonowane; dane robocze pozostają edytowalne do deadline'u.
-- Obserwacje trendów wskazują konkretne wizyty i nie interpretują braku wzmianki jako ustąpienia objawu.
-- Audio powinno trafić do osobnego object storage, a backend powinien przechowywać tylko metadane i zweryfikowaną transkrypcję.
-- `Database:Initialize=true` wykorzystuje `EnsureCreated` dla szybkiego demo. Przed produkcją należy ustawić `false` i wdrażać jawne migracje EF w pipeline.
+Demo integracji system–system ma trzy role:
 
-## Weryfikacja lokalna
+| Rola | `X-Api-Key` |
+|---|---|
+| Administracja | `demo-admin-key` |
+| Lekarz | `demo-clinician-key` |
+| System placówki | `demo-system-key` |
+
+Wartości są przeznaczone wyłącznie do lokalnego demo. Klucze integracyjne, connection stringi, `Security__PatientHmacKey`, `Security__EncryptionKey` i `Authentication__Jwt__SigningKey` muszą być dostarczone jako sekrety środowiska poza `Development`. Klucz JWT musi być losowym kluczem co najmniej 256-bitowym zakodowanym Base64.
+
+## Dostęp pacjenta
+
+Pacjent nie posiada konta i nie przekazuje PESEL-u jako poświadczenia. Placówka tworzy wizytę i otrzymuje jednorazowo link token oraz kod. Pacjent wymienia jeden z nich na krótko żyjący opaque bearer token ograniczony do jednego wywiadu:
+
+```text
+POST /api/v1/patient-access/link/exchange
+POST /api/v1/patient-access/code/exchange
+```
+
+Pozostałe endpointy pacjenta używają `Authorization: Bearer <session-token>`. Nie istnieje endpoint przeglądania historii pacjenta.
+
+Frontend powinien po wymianie linku natychmiast usunąć token linku z paska adresu (`history.replaceState`) i przechowywać sesję pacjenta w pamięci, nie w `localStorage`.
+
+## Izolacja danych
+
+- Administracja pobiera wyłącznie status, termin, dostarczenie zaproszenia i stan rundy.
+- Lekarz pobiera immutable `ReportVersion`, nigdy draft.
+- Lekarz odczytuje raport wyłącznie dla wizyty przypisanej do jego `ClinicianId`.
+- Podczas edycji poprzednia udostępniona wersja pozostaje dostępna.
+- Cofnięcie zgody natychmiast blokuje kolejne pobrania.
+- JSON i PDF są zapisane z tego samego snapshotu i mają wspólny `VersionId`.
+- PESEL służy jedynie do tworzenia HMAC correlation key; wartość źródłowa jest szyfrowana.
+
+## Komendy developerskie
 
 ```bash
-dotnet restore HealthPrep.sln
-dotnet build HealthPrep.sln --no-restore
-dotnet test HealthPrep.sln --no-build
+dotnet restore DocPrep.sln
+dotnet build DocPrep.sln --no-restore -c Release
+dotnet test DocPrep.sln --no-build -c Release
+dotnet ef database update --project src/DocPrep.Infrastructure --startup-project src/DocPrep.Api
 docker compose config
 ```
 
-## Agent ElevenLabs
+Swagger opisuje oba warianty dostępu do endpointów placówki jako alternatywę: JWT użytkownika panelu albo API key systemu placówki. Dla generowanego klienta TypeScript należy używać JWT; klucza `X-Api-Key` nie wolno osadzać w aplikacji przeglądarkowej.
 
-Dodano osobne encje `AgentInterview` → `AgentSession` → `ProviderConversationId` oraz `InterviewInvitation`. Powiązanie z istniejącą wizytą (`Appointment`) zachowuje dotychczasową obsługę zgód i zatwierdzonych wersji.
+## ElevenLabs Agent
 
-Konfiguracja wyłącznie na backendzie, przez środowisko / secret manager:
+Nowa wizyta automatycznie otrzymuje biznesowy wywiad oraz osobne zaproszenie do agenta. Odpowiedź `POST /api/v1/integration/visits` zawiera `interviewId` i jednorazowo jawny `interviewInvitationToken`. W bazie przechowywany jest wyłącznie SHA-256 tokenu.
 
-```dotenv
-ElevenLabs__ApiKey=...
-ElevenLabs__AgentId=...
-ElevenLabs__WebhookSecret=...
+Konfiguracja serwerowa:
+
+```text
+ElevenLabs__ApiKey=<secret>
+ElevenLabs__AgentId=agent_...
 ElevenLabs__Environment=production
+ElevenLabs__WebhookSecret=<secret>
 ```
 
-Dla `docker compose` odpowiadają im `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_WEBHOOK_SECRET`. Brak konfiguracji powoduje 503 przy rozpoczęciu sesji. Lokalnie API uruchom na porcie proxy frontendu:
+Żadna z tych wartości nie jest zwracana frontendowi. Voice otrzymuje krótkotrwały `conversationToken` WebRTC, a text chat `signedUrl` WebSocket.
+
+Publiczny flow rekomendowany dla frontendu:
+
+```text
+GET  /api/public/interviews/{invitationToken}
+POST /api/public/interviews/{invitationToken}/authorize
+     -> anonymous JWT ograniczony do jednego interviewId
+POST /api/interviews/{interviewId}/sessions
+PUT  /api/interview-sessions/{sessionId}/provider-conversation
+POST /api/interview-sessions/{sessionId}/end
+GET  /api/interviews/{interviewId}
+GET  /api/interviews/{interviewId}/result
+```
+
+Po `/authorize` frontend powinien usunąć surowy token zaproszenia z URL. Dla kompatybilności dostępne jest również bezpośrednie `POST /api/public/interviews/{invitationToken}/sessions`, ale wariant z anonimowym JWT jest bezpieczniejszy.
+
+Pacjent posiadający istniejącą sesję DocPrep może użyć:
+
+```text
+GET  /api/visits/{visitId}/interview
+POST /api/interviews/{interviewId}/sessions
+```
+
+Webhook należy skonfigurować w ElevenLabs jako:
+
+```text
+POST https://<api-host>/api/webhooks/elevenlabs
+```
+
+Backend weryfikuje `ElevenLabs-Signature` na surowym body, odrzuca podpisy starsze niż 30 minut, sprawdza `agent_id`, koreluje `conversation_id` z sesją i idempotentnie zapisuje transcript, analysis, metadata, data collection oraz finalne podsumowanie. Credential ElevenLabs, signed URL i surowy token zaproszenia nigdy nie są zapisywane.
+
+### Frontend i zakończenie sesji
+
+Frontend `Przed wizytą` znajduje się w `Frontend`; instrukcja uruchomienia jest w [README frontendu](../Frontend/README.md). Link publiczny ma postać `/i/{interviewInvitationToken}`. `/authorize` zwraca `accessToken`, `expiresIn` i `interviewId`. Frontend wywołuje endpointy wywiadu z bearer JWT i mapuje wynik `finalReport` oraz `structuredDataJson` na podsumowanie UI.
+
+`POST /api/interview-sessions/{sessionId}/end` przyjmuje `{ "continuesInterview": false }`. Oznacza transport i wywiad jako `processing`; wynik nadal pochodzi wyłącznie z podpisanego webhooka. Przy zmianie głosu na tekst frontend najpierw wysyła `continuesInterview: true`, a następnie zamyka SDK. Taka sesja ma status `Abandoned`, a jej webhook zapisuje transkrypcję bez kończenia wywiadu i zaproszenia. Opóźniony webhook starszej sesji nie zastępuje wyniku nowszej. Nie wymaga to nowej migracji: statusy mają już reprezentację tekstową. Aktualne migracje EF DocPrep zastępują wcześniejszy skrypt SQL HealthPrep; nie należy używać starego skryptu dla schematu `docprep`.
+
+Panel konta pacjenta pozostaje demonstracją. Sesja pacjenta DocPrep może zostać przekazana adapterowi frontendu przez `agentApi.setPatientSession(token)`; nagłówek `X-Patient-Id` nie jest obsługiwany.
+
+### Test endpointów agenta
+
+Testy domeny i dostawcy uruchamia `dotnet test DocPrep.sln`. Test pełnego API jest domyślnie pomijany bez izolowanej bazy PostgreSQL:
 
 ```sh
-ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:8080 dotnet run --project src/HealthPrep.Api --no-launch-profile
+DOCPREP_TEST_POSTGRES='Host=localhost;Database=docprep_test;Username=test;Password=test' dotnet test DocPrep.sln
 ```
 
-Nowa baza otrzymuje tabele przez `EnsureCreated`. Dla istniejącej bazy wykonaj **jednorazowo** `database/002_elevenlabs.sql` przed uruchomieniem nowego API. `EnsureCreated` nie aktualizuje istniejącego schematu. Skrypt dodaje tylko trzy tabele integracji i ich indeksy/klucze; nie usuwa danych wizyt.
-
-### Zaproszenia
-
-Po utworzeniu wizyty przez dotychczasowy endpoint:
-
-```sh
-curl -X POST http://localhost:8080/api/v1/integration/appointments/ID_WIZYTY/invitation \
-  -H 'X-Api-Key: demo-clinic-key'
-```
-
-Odpowiedź zawiera `invitationUrl: /i/{token}`, `invitationId`, `expiresAt`. Dodaj domenę frontendu do ścieżki. Ponowne wystawienie unieważnia wcześniejsze zaproszenia, a `DELETE` pod tym samym adresem je odwołuje. Nie wysyłamy SMS ani e-maili.
-
-Token ma 256 bitów losowości, w bazie jest tylko SHA-256. Wygasa najpóźniej w chwili wizyty lub po siedmiu dniach. Limit to trzy sesje, rezerwowane atomowo w transakcji; nieudane wydanie credentiala nie zużywa limitu. Walidacja publiczna zwraca tylko nazwę wywiadu, termin i status.
-
-`POST /api/public/interviews/{token}/authorize` wymienia zaproszenie na godzinny, chroniony **opaque bearer token ASP.NET Data Protection**, ograniczony do konkretnego wywiadu/zaproszenia. To wariant sesji aplikacyjnej z dokumentu integracji; token nie jest JWT. Serwer przy każdym użyciu ponownie sprawdza ważność i unieważnienie zaproszenia. W produkcji przechowuj i zabezpieczaj klucze Data Protection poza cyklem życia procesu, wspólne dla replik (`InterviewAccess__KeyDirectory`; Compose używa wolumenu `access_keys`). Tokeny aplikacyjne, zaproszenia i credentiale dostawcy nie są logowane przez kod integracji; analogiczne wyłączenie stosuj w reverse proxy i analityce.
-
-### API
-
-| Operacja | Endpoint |
-| --- | --- |
-| Metadane / wymiana zaproszenia | `GET /api/public/interviews/{token}`, `POST .../{token}/authorize` |
-| Odczyt / sesja / wynik gościa | `GET /api/interview`, `POST /api/interview/sessions`, `GET /api/interview/result` |
-| Wywiad dla wizyty pacjenta | `GET /api/visits/{visitId}/interview` |
-| Sesja / wynik pacjenta | `POST /api/interviews/{id}/sessions`, `GET /api/interviews/{id}/result` |
-| Potwierdzenie rozmowy dostawcy | `PUT /api/interview-sessions/{sessionId}/provider-conversation` |
-| Zakończenie transportu | `POST /api/interview-sessions/{sessionId}/end` |
-| Podpisany wynik | `POST /api/webhooks/elevenlabs` |
-
-Sesja przyjmuje `{ "mode": "voice" }` lub `text`. Głos otrzymuje WebRTC token, tekst signed URL. API key dostawcy jest wysyłany tylko przez serwer. Jeśli credential zawiera `conversation_id`, binding musi być identyczny; w przeciwnym razie backend potwierdza agenta i techniczny `user_id` przez API ElevenLabs. Identyfikator techniczny ma postać `session_{losowyGuid}`, bez e-maila czy PESEL-u. `dynamicVariables` zawierają `language` i `visit_type`; zadeklaruj te zmienne w konfiguracji agenta.
-
-Nowe endpointy pacjenta w Development dopuszczają `X-Patient-Id`. W produkcji wymagają uwierzytelnionego principal z `sub` / `NameIdentifier`; konfiguracja OIDC i rzeczywistego logowania nie jest jeszcze zaimplementowana. Panel konta frontendu pozostaje mockiem. Wariant publicznego zaproszenia działa niezależnie od logowania.
-
-Zakończenie połączenia oznacza `processing`; `{ "continuesInterview": true }` przy zmianie głosu na tekst zapisuje wcześniejszą sesję bez kończenia całego wywiadu. Dane poprzedniej sesji pozostają w bazie. Wynik wywiadu tworzy ostatnia zakończona sesja; frontend przekazuje jej historię jako kontekst. Pełne scalanie Data Collection pomiędzy sesjami wymaga osobnej logiki domenowej.
-
-### Konfiguracja agenta i webhooka
-
-W ElevenLabs ustaw prywatnego agenta obsługującego polski wywiad, WebRTC i tekst oraz pola Data Collection. Utwórz webhook `post_call_transcription` wskazujący na publiczny HTTPS `/api/webhooks/elevenlabs`; jego sekret wpisz do konfiguracji backendu. Włącz ponowienia webhooków. Dla lokalnego API potrzebny jest tunel HTTPS lub środowisko testowe dostępne dla ElevenLabs.
-
-Handler sprawdza HMAC-SHA256 dokładnych bajtów body, nagłówek `ElevenLabs-Signature` i timestamp (30 minut, także kontrola przyszłych dat). Zapisuje transcript, analysis, metadata, Data Collection i `transcript_summary`. Powtórzony webhook nie nadpisuje wyniku; opóźniona wcześniejsza sesja nie zastępuje nowszej. Nie zatwierdza raportu ani zgody i nie udostępnia automatycznie placówce. Endpointy pacjenta/gościa zwracają wynik, a dotychczasowy raport placówki nadal wymaga istniejącego procesu zatwierdzenia i zgody; mapowanie wyniku AI do tego procesu pozostaje do podłączenia.
-
-Źródła: [SDK JavaScript](https://elevenlabs.io/docs/eleven-agents/libraries/java-script), [post-call webhooks](https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks), [implementacja podpisu w oficjalnym SDK](https://github.com/elevenlabs/elevenlabs-python/blob/main/src/elevenlabs/webhooks_custom.py).
-
-### Testy integracji
-
-`dotnet test` uruchamia testy domeny, modelu i podpisów. Test endpointów jest domyślnie pomijany bez izolowanej bazy:
-
-```sh
-HEALTHPREP_TEST_POSTGRES='Host=localhost;Port=5432;Database=healthprep_test;Username=test;Password=test' dotnet test HealthPrep.sln
-```
-
-Użyj osobnej pustej bazy testowej. Test uruchamia lokalne API i atrapę dostawcy, sprawdza credentiale, izolację uprawnień, konkurencyjny limit, odwołanie linka, podpis i idempotencję webhooka. Nie łączy się z ElevenLabs.
+Użyj osobnej bazy testowej. Test uruchamia aplikację z autoryzacją JWT i migracjami, zastępuje dostawcę oraz sesje Redis atrapami, sprawdza izolację wywiadów, limit sesji, zmianę trybu, status przetwarzania, podpis i idempotencję webhooka. Nie kontaktuje się z ElevenLabs.

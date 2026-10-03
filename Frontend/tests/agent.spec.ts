@@ -38,7 +38,8 @@ test('SDK łączy głos i czat, zachowuje historię, zwalnia mikrofon i pobiera 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
-    if (path.endsWith('/authorize')) await route.fulfill({ json: { accessToken: 'scoped-token' } })
+    if (path.endsWith('/authorize'))
+      await route.fulfill({ json: { accessToken: 'scoped-token', interviewId: 'interview-sdk' } })
     else if (path.endsWith('/sessions')) {
       const { mode } = request.postDataJSON()
       session++
@@ -47,8 +48,6 @@ test('SDK łączy głos i czat, zachowuje historię, zwalnia mikrofon i pobiera 
           sessionId: `session_${session}`,
           provider: 'elevenlabs',
           mode,
-          userId: `technical_${session}`,
-          dynamicVariables: { language: 'pl' },
           ...(mode === 'voice'
             ? { conversationToken: 'temporary-voice' }
             : { signedUrl: 'wss://temporary-text' }),
@@ -62,14 +61,15 @@ test('SDK łączy głos i czat, zachowuje historię, zwalnia mikrofon i pobiera 
       await route.fulfill({
         json: {
           status: 'completed',
-          summary: 'Pacjent opisuje ból głowy od trzech dni.',
-          structuredData: {},
+          finalReport: 'Pacjent opisuje ból głowy od trzech dni.',
+          structuredDataJson: '{}',
         },
       })
     else
       await route.fulfill({
         json: {
           interview: {
+            id: 'interview-sdk',
             displayName: 'Wywiad',
             visitDate: '2026-12-10T10:00:00Z',
             status: 'pending',
