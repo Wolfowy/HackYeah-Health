@@ -125,7 +125,7 @@ Swagger opisuje oba warianty dostępu do endpointów placówki jako alternatywę
 
 Instrukcja krok po kroku: [ElevenLabs — konfiguracja i stan integracji](../docs/elevenlabs-uruchomienie.md), w tym pobranie klucza API, konfiguracja webhooka i utworzenie linku do rozmowy.
 
-Nowa wizyta automatycznie otrzymuje biznesowy wywiad oraz osobne zaproszenie do agenta. Odpowiedź `POST /api/v1/integration/visits` zawiera `interviewId` i jednorazowo jawny `interviewInvitationToken`. W bazie przechowywany jest wyłącznie SHA-256 tokenu.
+Nowa wizyta automatycznie otrzymuje biznesowy wywiad oraz osobne zaproszenie do agenta. Odpowiedź `POST /api/v1/integration/visits` zawiera `interviewId` i jawny `interviewInvitationToken`. Weryfikacja korzysta z SHA-256 tokenu. Nowe zaproszenia mają także szyfrowaną kopię tokenu, dzięki której uprawniona recepcja może ponownie pobrać ten sam link przez `/api/v1/admin/appointments/{id}/invitation`.
 
 Konfiguracja serwerowa:
 

@@ -1,6 +1,6 @@
 # Adminpanel i kontynuacja rozmowy — implementacja MVP
 
-Stan: 4 października 2026. Zmiany przygotowane w osobnym worktree na branchu `codex/admin-backend-mvp`, przeznaczone do scalenia z `main`.
+Stan: 4 października 2026. Zmiany przygotowane w osobnym worktree na branchu `codex/admin-backend-mvp` i scalone do `main`.
 
 ## Wynik audytu
 
@@ -127,4 +127,6 @@ Grafiki pracy lekarzy, urlopy, cykliczne sloty i synchronizacja z zewnętrznym k
 - 26 testów backendu, w tym dwa rzeczywiste scenariusze HTTP na osobnej bazie PostgreSQL: proces ElevenLabs oraz recepcja (JWT, izolacja placówek/roli, szyfrowanie, odczyt/wysyłka/regeneracja linku, lista/kalendarz, zmiana wersji, anulowanie, równoczesna kolizja).
 - Build frontendu i 12 testów jednostkowych w izolowanym worktree.
 - 4 testy przeglądarkowe na desktopie i telefonie: istniejący flow głos/czat oraz powrót do rozmowy. Test kontynuacji używa atrapy transportu ElevenLabs i prawdziwego hooka/API adaptera; sprawdza dwukrotne otwarcie linku, świeże poświadczenia i przekazanie zapisanego kontekstu. Weryfikacja nie generuje płatnych rozmów ElevenLabs.
-- Lokalny kontener API należy odtworzyć po scaleniu; migracje są wykonywane przy starcie. Istniejący PostgreSQL i woluminy pozostają na miejscu.
+- Po scaleniu: build frontendu, 24 testy jednostkowe i 4 testy przeglądarkowe zakończone sukcesem także z zachowanymi wcześniejszymi zmianami w głównym katalogu.
+- Lokalny `docprep-local-api-1` został przebudowany i odtworzony ze scalonego kodu. `/health/ready` zwraca 200 (`ready`), a odczyt `/api/v1/admin/doctors` i `/api/v1/admin/appointments` przez JWT zwraca 200. Migracja została wykonana przy starcie. Istniejący PostgreSQL, Redis i woluminy pozostały na miejscu.
+- Porównanie zawartości potwierdziło zachowanie wszystkich 64 wcześniej zmienionych lub nieśledzonych plików. Hook rozmowy zawiera wcześniejsze zmiany oraz dodatkowy blok przekazania skrótu.

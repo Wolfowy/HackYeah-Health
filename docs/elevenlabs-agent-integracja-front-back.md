@@ -1405,7 +1405,7 @@ wyłącznie backend.
 
 - co najmniej 128–256 bitów entropii,
 - generowany przez CSPRNG,
-- w bazie przechowywany tylko hash,
+- weryfikacja przez hash; od MVP recepcji także szyfrowana kopia do ponownego pobrania linku przez administrację,
 - możliwość wygaśnięcia,
 - możliwość ręcznego unieważnienia.
 
