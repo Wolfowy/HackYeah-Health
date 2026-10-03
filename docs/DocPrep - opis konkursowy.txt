@@ -1,0 +1,136 @@
+NAZWA PROJEKTU
+
+DocPrep
+
+
+JEDNOZDANIOWY OPIS
+
+DocPrep to asystent przygotowania do wizyty lekarskiej, który pomaga pacjentowi uporządkować informacje o objawach, lekach i pytaniach, a następnie przekazać lekarzowi zatwierdzony, czytelny raport jeszcze przed konsultacją.
+
+
+PROBLEM
+
+Podczas wizyty pacjent często nie pamięta dokładnych dat, zmian nasilenia objawów, nazw leków lub pytań, które chciał zadać. Informacje są rozproszone, przedstawiane bez chronologii albo pomijane pod wpływem stresu. Lekarz musi więc poświęcić część ograniczonego czasu konsultacji na ponowne zebranie podstawowego wywiadu, zamiast skupić się na rozmowie z pacjentem i analizie jego sytuacji.
+
+Problem staje się jeszcze większy przy kolejnych wizytach. Pacjentowi trudno samodzielnie zauważyć, które dolegliwości są nowe, które się powtarzają, a które zmieniły się w czasie. Placówka nie wie natomiast, czy pacjent przygotował informacje potrzebne do konsultacji.
+
+
+ROZWIĄZANIE
+
+DocPrep prowadzi pacjenta przez prosty wywiad tekstowy lub głosowy przed wizytą. System pomaga zebrać powód konsultacji, objawy i ich chronologię, leki, alergie, choroby przewlekłe oraz pytania do lekarza. Następnie porządkuje te informacje, wskazuje braki i niejasności oraz przygotowuje podsumowanie, które pacjent może poprawić, zatwierdzić i osobno udostępnić placówce.
+
+Przy kolejnych wywiadach DocPrep porównuje informacje z wcześniejszymi zapisami tego samego pacjenta i proponuje ostrożnie sformułowane obserwacje, na przykład informację o ponownie zgłoszonym objawie lub zmianie jego nasilenia. Każda taka obserwacja pozostaje pod kontrolą pacjenta i trafia do raportu tylko po zaakceptowaniu albo edycji.
+
+DocPrep nie diagnozuje, nie sugeruje diagnozy, nie zaleca leczenia i nie ocenia pilności objawów. Jego zadaniem jest lepsze przygotowanie informacji i usprawnienie komunikacji między pacjentem a personelem medycznym.
+
+
+GRUPA DOCELOWA
+
+Głównymi użytkownikami są pacjenci przygotowujący się do konsultacji, szczególnie osoby, którym trudno zapamiętać przebieg dolegliwości lub zwięźle opisać go podczas wizyty.
+
+Z rozwiązania korzystają również lekarze, którzy przed konsultacją otrzymują uporządkowane, zatwierdzone przez pacjenta informacje, oraz placówki medyczne, które mogą monitorować stan przygotowania wizyt bez ujawniania personelowi administracyjnemu treści klinicznej.
+
+
+JAK DZIAŁA DOCPREP
+
+1. Placówka tworzy proces przygotowania do wizyty i wysyła pacjentowi bezpieczny link lub kod.
+
+2. Pacjent otwiera wywiad bez zakładania konta i wybiera rozmowę tekstową albo głosową.
+
+3. Asystent pomaga zebrać i uporządkować informacje o powodach konsultacji, objawach, lekach, alergiach, chorobach przewlekłych oraz pytaniach do lekarza.
+
+4. System pokazuje braki, sprzeczności i propozycje obserwacji wynikających z wcześniejszych wywiadów. Nie dopisuje faktów, których pacjent nie podał.
+
+5. Pacjent poprawia lub usuwa informacje, decyduje o obserwacjach AI i zatwierdza treść raportu.
+
+6. W osobnym kroku pacjent wyraża zgodę na udostępnienie raportu konkretnej placówce.
+
+7. Lekarz otrzymuje szybki przegląd najważniejszych informacji i może przesłać pytania uzupełniające jeszcze przed wizytą.
+
+8. Pacjent odpowiada na dodatkowe pytania i zatwierdza nową wersję, a poprzednia zatwierdzona wersja pozostaje w historii.
+
+
+NAJWAŻNIEJSZE FUNKCJE MVP
+
+1. Wywiad tekstowy i głosowy wspierany przez AI.
+
+2. Automatyczne porządkowanie chronologii objawów oraz informacji o lekach, alergiach i chorobach przewlekłych.
+
+3. Możliwość poprawienia lub usunięcia każdej informacji przed zatwierdzeniem.
+
+4. Wykrywanie braków i sprzeczności bez samodzielnego uzupełniania danych przez AI.
+
+5. Porównywanie kolejnych wywiadów i proponowanie obserwacji dotyczących nowych, zmieniających się lub powtarzających objawów.
+
+6. Niezmienne, wersjonowane raporty generowane jako PDF i dane JSON.
+
+7. Oddzielenie zatwierdzenia treści od zgody na jej udostępnienie.
+
+8. Panel placówki ze statusami przygotowania wizyt oraz osobny, uporządkowany widok dla lekarza.
+
+9. Pytania uzupełniające od lekarza i ponowne zatwierdzanie zaktualizowanego raportu.
+
+10. API umożliwiające integrację z systemem placówki i pobieranie zatwierdzonych raportów.
+
+
+INNOWACYJNOŚĆ
+
+DocPrep nie jest kolejnym chatbotem udzielającym porad medycznych. Rozwiązanie skupia się na bezpiecznym i konkretnym etapie procesu leczenia: przygotowaniu informacji przed wizytą oraz przekazaniu ich lekarzowi w formie kontrolowanej przez pacjenta.
+
+Innowacyjność projektu polega na połączeniu konwersacyjnego wywiadu głosowego i tekstowego, uporządkowanej chronologii, wykrywania braków, porównywania kolejnych wywiadów oraz świadomego zatwierdzania obserwacji AI. System zachowuje przy tym granicę między wsparciem organizacyjnym a podejmowaniem decyzji medycznych.
+
+Wartością jest również wersjonowanie raportów. Lekarz pracuje na ostatniej zatwierdzonej wersji, podczas gdy pacjent może przygotowywać uzupełnienia bez nadpisywania wcześniejszych informacji. Dzięki temu każda zmiana pozostaje czytelna i możliwa do prześledzenia.
+
+
+PRAKTYCZNA WARTOŚĆ
+
+Dla pacjenta DocPrep oznacza mniej stresu, mniejsze ryzyko pominięcia ważnej informacji i większe poczucie kontroli nad przygotowaniem do konsultacji. Możliwość rozmowy głosowej obniża próg wejścia dla osób, które nie chcą lub nie mogą wypełniać długiego formularza.
+
+Dla lekarza rozwiązanie zapewnia szybki przegląd powodu konsultacji, chronologii objawów, leków, alergii, pytań pacjenta oraz tematów wymagających wyjaśnienia. Nie zastępuje rozmowy, lecz pozwala lepiej wykorzystać jej czas.
+
+Dla placówki DocPrep tworzy spójny proces przygotowania wizyt, pozwala monitorować postęp bez ujawniania treści osobom nieuprawnionym i może zostać połączony z istniejącym systemem przez API.
+
+
+BEZPIECZEŃSTWO I KONTROLA PACJENTA
+
+Pacjent nie musi zakładać konta. Otrzymuje ograniczony do jednej wizyty link lub kod, a ponowne wygenerowanie zaproszenia unieważnia poprzednie. Dane są udostępniane dopiero po zatwierdzeniu raportu i osobnej zgodzie dla konkretnej placówki.
+
+Pacjent może poprawić lub usunąć każdą informację, zaakceptować, odrzucić albo edytować obserwację AI oraz cofnąć zgodę na dalszy dostęp w DocPrep. Personel administracyjny widzi wyłącznie status procesu i informacje operacyjne, bez dostępu do treści klinicznej.
+
+W trybie głosowym nagranie służy wyłącznie do utworzenia transkrypcji i jest następnie usuwane. System przechowuje tekst, który pacjent może sprawdzić przed zatwierdzeniem. Raport pokazuje również braki i sprzeczności zamiast maskować je lub uzupełniać niepotwierdzonymi informacjami.
+
+
+TECHNOLOGIA I MOŻLIWOŚĆ WDROŻENIA
+
+DocPrep ma architekturę umożliwiającą niezależny rozwój interfejsu pacjenta, logiki procesów oraz integracji z placówkami. Warstwa użytkownika powstaje w React i TypeScript, a backend w ASP.NET Core. Dane trwałe mogą być przechowywane w PostgreSQL, natomiast krótkotrwałe sesje dostępu w Redisie.
+
+Konwersacyjny wywiad głosowy i tekstowy wykorzystuje ElevenLabs. Klucze dostawcy pozostają po stronie serwera, a aplikacja pacjenta otrzymuje jedynie krótkotrwałe dane dostępowe ograniczone do konkretnej rozmowy. Zatwierdzony raport jest dostępny jako czytelny PDF oraz odpowiadający mu JSON, dzięki czemu rozwiązanie może współpracować zarówno z człowiekiem, jak i z systemem placówki.
+
+Rozdzielenie dostępu pacjenta, personelu i systemu placówki, wersjonowanie raportów oraz API integracyjne tworzą podstawę do dalszego pilotażu i wdrożenia w rzeczywistym środowisku medycznym.
+
+
+SCENARIUSZ DEMONSTRACYJNY
+
+Demo przedstawia trzy fikcyjne wywiady tego samego pacjenta. Pierwszy zapisuje początkowe dolegliwości, drugi pokazuje zmianę ich nasilenia, a trzeci zawiera zarówno nowy objaw, jak i powracający problem.
+
+Placówka inicjuje przygotowanie wizyty, a pacjent otwiera otrzymany link i przechodzi wywiad głosowy lub tekstowy. DocPrep porządkuje informacje, porównuje je z wcześniejszymi wywiadami i proponuje obserwacje. Pacjent sprawdza dane, poprawia je, zatwierdza raport oraz osobno udostępnia go placówce.
+
+Lekarz widzi raport i listę braków, po czym zadaje pytania uzupełniające. Pacjent odpowiada i zatwierdza nową wersję. Lekarz otrzymuje aktualny raport w panelu i przez API, a poprzednia zatwierdzona wersja pozostaje dostępna w historii.
+
+
+DOPASOWANIE DO KATEGORII SPORT & HEALTHCARE
+
+DocPrep bezpośrednio odpowiada na wskazany w kategorii obszar przygotowania do wizyt medycznych, komunikacji z profesjonalistami oraz organizowania i bezpiecznego udostępniania informacji zdrowotnych.
+
+Projekt prowadzi użytkownika przez jasną i osiągalną ścieżkę: od zebrania rozproszonych informacji, przez ich uporządkowanie i świadome zatwierdzenie, po wykorzystanie raportu podczas konsultacji. Rozmowa głosowa, możliwość przejścia do tekstu, prosty dostęp bez konta oraz kontrola nad każdą informacją zwiększają dostępność i ograniczają wysiłek potrzebny do regularnego korzystania z rozwiązania.
+
+DocPrep łączy innowacyjne wykorzystanie AI z praktycznym zastosowaniem, czytelnym interfejsem i architekturą przygotowaną do integracji. Dzięki temu odpowiada na wszystkie główne kryteria oceny: oryginalność pomysłu, zgodność z kategorią, użyteczność, jakość doświadczenia użytkownika oraz potencjał wdrożeniowy.
+
+
+WYKORZYSTANIE AI I ZEWNĘTRZNYCH TECHNOLOGII
+
+Sztuczna inteligencja jest wykorzystywana do prowadzenia wywiadu, porządkowania informacji, wskazywania braków oraz proponowania obserwacji na podstawie kolejnych wywiadów. W funkcjach konwersacyjnych projekt korzysta z usług ElevenLabs. AI nie podejmuje decyzji medycznych, a każda informacja przeznaczona do raportu podlega kontroli pacjenta.
+
+W pracach nad projektem wykorzystano również narzędzia AI wspierające programowanie i przygotowanie dokumentacji. Zespół zachowuje odpowiedzialność za architekturę, działanie, bezpieczeństwo i sposób wykorzystania wszystkich wygenerowanych elementów.
+
+Projekt korzysta także z ogólnodostępnych bibliotek i frameworków, między innymi React, TypeScript, ASP.NET Core, PostgreSQL i Redis, zgodnie z ich warunkami licencyjnymi.
