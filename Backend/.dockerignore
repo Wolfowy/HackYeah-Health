@@ -3,4 +3,5 @@
 .dotnet-cli
 .git
 .env
+.local
 TestResults

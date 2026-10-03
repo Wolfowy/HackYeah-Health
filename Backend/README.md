@@ -15,6 +15,29 @@ Solution zawiera `DocPrep.Domain`, `DocPrep.Application`, `DocPrep.Infrastructur
 
 ## Uruchomienie
 
+### Istniejący PostgreSQL na porcie 2142
+
+Lokalny wariant uruchamia API i Redis, korzystając z istniejącego PostgreSQL na komputerze. Z katalogu `Backend`:
+
+```sh
+# Tylko jeśli nie masz jeszcze .env:
+cp .env.local.example .env
+# Ustaw hasło istniejącego PostgreSQL oraz wartości ElevenLabs w .env.
+docker compose -f compose.local.yaml --env-file .env up --build -d
+```
+
+Połączenie używa `host.docker.internal:2142`, użytkownika `postgres` i bazy `docprep`. Hasło jest wyłącznie w ignorowanym pliku `Backend/.env`. Migracje EF tworzą bazę i schemat przy pierwszym starcie. Redis nie publikuje portu na komputerze, a API jest dostępne na `http://127.0.0.1:8080`.
+
+W `Backend/.env` wklej pełny klucz do `ELEVENLABS_API_KEY`, a identyfikator `agent_…` do `ELEVENLABS_AGENT_ID`. Sekret podpisanego webhooka wpisz do `ELEVENLABS_WEBHOOK_SECRET`. Po zmianie tych wartości odtwórz API:
+
+```sh
+docker compose -f compose.local.yaml --env-file .env up -d --force-recreate api
+```
+
+Uruchom frontend w osobnym terminalu przez `cd Frontend && npm run dev` z katalogu repozytorium. Adres `http://127.0.0.1:5173` przekazuje `/api` do tego backendu. Polecenie zatrzymania lokalnego wariantu to `docker compose -f compose.local.yaml --env-file .env down`; nie zatrzymuje istniejącego PostgreSQL.
+
+### Pełny zestaw usług z własnym PostgreSQL
+
 ```bash
 docker compose up --build
 ```
@@ -94,6 +117,8 @@ docker compose config
 Swagger opisuje oba warianty dostępu do endpointów placówki jako alternatywę: JWT użytkownika panelu albo API key systemu placówki. Dla generowanego klienta TypeScript należy używać JWT; klucza `X-Api-Key` nie wolno osadzać w aplikacji przeglądarkowej.
 
 ## ElevenLabs Agent
+
+Instrukcja krok po kroku: [ElevenLabs — konfiguracja i stan integracji](../docs/elevenlabs-uruchomienie.md), w tym pobranie klucza API, konfiguracja webhooka i utworzenie linku do rozmowy.
 
 Nowa wizyta automatycznie otrzymuje biznesowy wywiad oraz osobne zaproszenie do agenta. Odpowiedź `POST /api/v1/integration/visits` zawiera `interviewId` i jednorazowo jawny `interviewInvitationToken`. W bazie przechowywany jest wyłącznie SHA-256 tokenu.
 

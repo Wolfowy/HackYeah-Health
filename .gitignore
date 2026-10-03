@@ -2,6 +2,7 @@
 **/obj/
 Backend/.dotnet-cli/
 Backend/TestResults/
+Backend/.local/
 .env
 .idea/
 .vs/

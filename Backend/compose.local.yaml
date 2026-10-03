@@ -1,0 +1,36 @@
+name: docprep-local
+
+# Uses an existing PostgreSQL exposed by Docker on the host.
+services:
+  api:
+    build:
+      context: .
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: Host=${POSTGRES_HOST:-host.docker.internal};Port=${POSTGRES_PORT:-2142};Database=${POSTGRES_DATABASE:-docprep};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Backend/.env}
+      ConnectionStrings__Redis: redis:6379
+      ElevenLabs__ApiKey: ${ELEVENLABS_API_KEY:-}
+      ElevenLabs__AgentId: ${ELEVENLABS_AGENT_ID:-}
+      ElevenLabs__Environment: ${ELEVENLABS_ENVIRONMENT:-production}
+      ElevenLabs__WebhookSecret: ${ELEVENLABS_WEBHOOK_SECRET:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  redis_data:

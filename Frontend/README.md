@@ -41,6 +41,8 @@ Token zaproszenia po autoryzacji znika z URL. Sesja aplikacyjna i tymczasowy cre
 
 Instrukcja serwerowa: [Backend/README.md](../Backend/README.md). Placówka tworzy wizytę przez `POST /api/v1/integration/visits`. Zwrócony `interviewInvitationToken` służy do zbudowania adresu `/i/{token}` na domenie frontendu. Wymiana zaproszenia zwraca anonimowy JWT i `interviewId`; kolejne żądania trafiają do `/api/interviews/{interviewId}/sessions` i `/result`.
 
+Konfiguracja klucza API, agenta i webhooka oraz zweryfikowany zakres integracji: [ElevenLabs — uruchomienie](../docs/elevenlabs-uruchomienie.md).
+
 Opcjonalnie skopiuj `.env.example` do `.env.local`:
 
 ```dotenv
