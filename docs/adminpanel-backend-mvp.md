@@ -27,28 +27,33 @@ Dla recepcji brakowało katalogu lekarzy, danych pacjenta do listy wizyt, czasu 
 
 Wszystkie endpointy `/api/v1/admin` wymagają JWT roli `Administrative` albo serwerowego API key roli `Administrative`/`System`. Frontend korzysta z `/api/v1/auth/login|refresh|logout|me`; API key nie powinien trafić do przeglądarki.
 
-| Metoda | Ścieżka `/api/v1/admin` | Wynik |
-|---|---|---|
-| GET | `/facility` | Placówka bieżącego użytkownika |
-| GET | `/doctors?includeInactive=true` | Lista lekarzy; domyślnie aktywni |
-| POST | `/doctors` | Utworzenie lekarza, 201 |
-| PUT | `/doctors/{id}` | Edycja/aktywacja/dezaktywacja |
-| GET | `/appointments` | `{items,page,pageSize,total}` |
-| POST | `/appointments` | `{appointment,invitation}`, 201 |
-| GET | `/appointments/{id}` | Szczegóły recepcji |
-| PUT | `/appointments/{id}` | Zmiana rezerwacji |
-| POST | `/appointments/{id}/cancel` | Anulowanie, 204 |
-| GET | `/calendar?from=...&to=...` | Wizyty przecinające zakres |
-| GET | `/appointments/{id}/invitation` | Obecny link |
-| POST | `/appointments/{id}/invitation/send` | Wysłanie istniejącego linku |
-| POST | `/appointments/{id}/invitation/regenerate` | Nowy link; poprzedni zostaje unieważniony |
+| Metoda | Ścieżka `/api/v1/admin`                    | Wynik                                     |
+| ------ | ------------------------------------------ | ----------------------------------------- |
+| GET    | `/facility`                                | Placówka bieżącego użytkownika            |
+| GET    | `/doctors?includeInactive=true`            | Lista lekarzy; domyślnie aktywni          |
+| POST   | `/doctors`                                 | Utworzenie lekarza, 201                   |
+| PUT    | `/doctors/{id}`                            | Edycja/aktywacja/dezaktywacja             |
+| GET    | `/appointments`                            | `{items,page,pageSize,total}`             |
+| POST   | `/appointments`                            | `{appointment,invitation}`, 201           |
+| GET    | `/appointments/{id}`                       | Szczegóły recepcji                        |
+| PUT    | `/appointments/{id}`                       | Zmiana rezerwacji                         |
+| POST   | `/appointments/{id}/cancel`                | Anulowanie, 204                           |
+| GET    | `/calendar?from=...&to=...`                | Wizyty przecinające zakres                |
+| GET    | `/appointments/{id}/invitation`            | Obecny link                               |
+| POST   | `/appointments/{id}/invitation/send`       | Wysłanie istniejącego linku               |
+| POST   | `/appointments/{id}/invitation/regenerate` | Nowy link; poprzedni zostaje unieważniony |
 
 Filtry listy: `from`, `to`, `doctorId`, `room`, `status`, `q`, `page`, `pageSize` (maksymalnie 100). Kalendarz dodatkowo obsługuje `doctorId` i `room`. Daty są ISO 8601 z offsetem; backend zapisuje je w PostgreSQL jako UTC. `timeZone` domyślnie wynosi `Europe/Warsaw`, także przy zmianie czasu letniego/zimowego.
 
 Przykładowy lekarz:
 
 ```json
-{"id":"doctor-demo","name":"Anna Nowak","specialty":"Internista","defaultRoom":"01"}
+{
+  "id": "doctor-demo",
+  "name": "Anna Nowak",
+  "specialty": "Internista",
+  "defaultRoom": "01"
+}
 ```
 
 Identyfikator lekarza odpowiada `clinicianId` konta personelu. Utworzenie profilu nie zakłada konta z hasłem. Aby lekarz mógł odczytywać swoje raporty, administracja tworzy konto przez istniejące `POST /api/v1/staff` z `role: "Clinician"` i tym samym `clinicianId`. Utworzenie konta lekarza uzupełnia brakujący wpis katalogu; w Development istniejące konta demo również uzupełniają katalog.
@@ -57,16 +62,16 @@ Przykładowa wizyta:
 
 ```json
 {
-  "patientName":"Jan Testowy",
-  "phone":"+48500100200",
-  "email":"jan@example.invalid",
-  "doctorId":"doctor-demo",
-  "scheduledAt":"2026-12-10T10:00:00+01:00",
-  "durationMinutes":30,
-  "room":"01",
-  "visitType":"InPerson",
-  "timeZone":"Europe/Warsaw",
-  "sendInvitation":false
+  "patientName": "Jan Testowy",
+  "phone": "+48500100200",
+  "email": "jan@example.invalid",
+  "doctorId": "doctor-demo",
+  "scheduledAt": "2026-12-10T10:00:00+01:00",
+  "durationMinutes": 30,
+  "room": "01",
+  "visitType": "InPerson",
+  "timeZone": "Europe/Warsaw",
+  "sendInvitation": false
 }
 ```
 
@@ -84,11 +89,11 @@ Konflikty zwracają 409 i kod w `ProblemDetails.code`, np. `calendar.clinician_c
 
 ```json
 {
-  "language":"pl",
-  "visit_type":"wywiad przed wizytą",
-  "interview_type":"pre-visit",
-  "is_continuation":true,
-  "previous_conversation_summary":"Podsumowanie sesji: ..."
+  "language": "pl",
+  "visit_type": "wywiad przed wizytą",
+  "interview_type": "pre-visit",
+  "is_continuation": true,
+  "previous_conversation_summary": "Podsumowanie sesji: ..."
 }
 ```
 
