@@ -4,6 +4,7 @@ System pomaga pacjentowi uporządkować informacje przed wizytą i udostępnić 
 
 - [Dokumentacja backendu](Backend/README.md)
 - [Uruchomienie frontendu](Frontend/README.md)
+- [Panel recepcji i lekarza — API, demo i uruchomienie](AdminFrontend/README.md)
 - [Opis ekranów i modeli frontendu](docs/przed-wizyta-frontend.md)
 - [Konfiguracja ElevenLabs i stan integracji](docs/elevenlabs-uruchomienie.md)
 - [Plan implementacji backendu i frontendu](docs/plan-implementacji-backend-frontend.md)
