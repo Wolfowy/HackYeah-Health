@@ -1,5 +1,7 @@
 # Przed wizytą — opis frontendu
 
+Aktualizacja 4.10.2026: rzeczywiste konto pacjenta i raport są podłączone do backendu. Szczegóły endpointów, transkrypcji i testów: [README frontendu](../Frontend/README.md#raport-i-konto--integracja-z-aktualnym-backendem).
+
 ## Cel aplikacji
 
 Frontend pomaga pacjentowi zebrać informacje przed umówioną wizytą: powód konsultacji, objawy, czas ich występowania, leki i powody ich przyjmowania, alergie, choroby przewlekłe oraz pytania do lekarza. Głównym elementem jest rozmowa głosowa z asystentem AI; w dowolnej chwili można przejść do pisania.
@@ -10,26 +12,27 @@ Interfejs jest po polsku i dostosowuje się do komputera oraz telefonu. Rozmowie
 
 ### Panel pacjenta
 
-Panel zawiera nawigację do wywiadu, wizyty i podsumowania. Po otwarciu konta demonstracyjnego dochodzą lista nadchodzących wizyt, avatar i profil pacjenta. Każda wizyta ma własną historię odpowiedzi oraz raport. Pacjent może poprawić odpowiedzi i dodać dodatkowy opis, zatwierdzić wersję raportu, osobno udostępnić ją placówce lub cofnąć zgodę.
+Panel rzeczywistego konta zawiera własne wizyty i profil z avatarem. Wybrana wizyta otwiera rozmowę albo gotowe podsumowanie. Każda wizyta ma własną historię odpowiedzi oraz raport. Pacjent może poprawić odpowiedzi i dodać dodatkowy opis, zatwierdzić wersję raportu, osobno udostępnić ją placówce lub cofnąć zgodę.
 
-Panel, logowanie, profil i edycja raportów korzystają obecnie z danych demonstracyjnych. Formularz logowania nie wysyła hasła do serwera i nie tworzy rzeczywistej sesji uwierzytelnienia.
+Strona główna udostępnia prawdziwe konto pacjenta: rejestrację ze zweryfikowanego linku, logowanie, odnowienie JWT, profil z avatarem i listę własnych wizyt. Otwarcie wizyty wydaje osobną sesję ograniczoną do niej. Tokeny pozostają w pamięci; po odświeżeniu potrzebne jest ponowne logowanie. Dotychczasowa makieta i jej pełny sidebar są zachowane pod `/demo`.
 
 ### Rozmowa z linka, bez logowania
 
 Adres `/i/{token}` otwiera ekran zawierający wyłącznie rozmowę oraz podstawowy kontekst terminu wizyty. Nie ma bocznej nawigacji, profilu ani listy pozostałych wizyt.
 
-Backend DocPrep sprawdza zaproszenie i wymienia jego token na anonimowy JWT ograniczony do jednego wywiadu. Odpowiedź zawiera także `interviewId`, używany w kolejnych żądaniach. Frontend usuwa token zaproszenia z adresu i przechodzi na `/rozmowa`. Sesja pozostaje w pamięci strony; po odświeżeniu należy ponownie otworzyć otrzymany link. Nieprawidłowe, wygasłe, unieważnione lub ukończone zaproszenie blokuje uruchomienie agenta.
+Backend DocPrep sprawdza zaproszenie i wymienia jego token na anonimowy JWT ograniczony do jednego wywiadu. Odpowiedź zawiera także `interviewId`, używany w kolejnych żądaniach. Frontend usuwa token zaproszenia z adresu i przechodzi na `/rozmowa`. Sesja pozostaje w pamięci strony; po odświeżeniu należy ponownie otworzyć otrzymany link. Nieprawidłowe, wygasłe i unieważnione zaproszenia blokują dostęp. Ukończony link otwiera podsumowanie, poprawki i zatwierdzenie, bez uruchamiania nowej sesji agenta.
 
 ## Dostępne adresy
 
-| Adres | Przeznaczenie |
-| --- | --- |
-| `/` | Panel demonstracyjny; wewnętrzna nawigacja używa hash URL. |
-| `/i/demo-appointment-1` | Rozmowa demonstracyjna dla pierwszej wizyty, bez sidebaru. |
-| `/i/demo-appointment-2` | Rozmowa demonstracyjna dla drugiej wizyty, bez sidebaru. |
-| `/i/{token}` | Rozmowa ElevenLabs po walidacji zaproszenia przez backend. |
+| Adres                         | Przeznaczenie                                                            |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `/`                           | Rzeczywiste konto pacjenta i własne wizyty.                              |
+| `/demo`                       | Panel demonstracyjny; wewnętrzna nawigacja używa hash URL.               |
+| `/i/demo-appointment-1`       | Rozmowa demonstracyjna dla pierwszej wizyty, bez sidebaru.               |
+| `/i/demo-appointment-2`       | Rozmowa demonstracyjna dla drugiej wizyty, bez sidebaru.                 |
+| `/i/{token}`                  | Rozmowa ElevenLabs po walidacji zaproszenia przez backend.               |
 | `/visits/{visitId}/interview` | Rozmowa przez API pacjenta; wymaga tożsamości rozpoznanej przez backend. |
-| `/rozmowa` | Ekran po autoryzacji zaproszenia, bez tokenu w URL. |
+| `/rozmowa`                    | Ekran po autoryzacji zaproszenia, bez tokenu w URL.                      |
 
 ## Przebieg rzeczywistej rozmowy
 
@@ -47,16 +50,16 @@ Rozmowa rozróżnia stany oczekiwania, prośby o mikrofon, łączenia, aktywnego
 
 Modele panelu znajdują się w `Frontend/src/models.ts`, a kontrakty integracji w `Frontend/src/lib/agent-api.ts`.
 
-| Model | Odpowiedzialność |
-| --- | --- |
-| `Session`, `PatientProfile` | Tryb gościa lub konta oraz profil demonstracyjny. |
-| `Appointment` | Termin, placówka, lekarz, specjalizacja i status przygotowania wizyty. |
-| `Interview`, `Message`, `InterviewAnswer` | Stan wywiadu, historia rozmowy i zatwierdzone odpowiedzi. |
-| `InterviewReport`, `ReportSection` | Pola raportu, pochodzenie informacji oraz oznaczenie braków i niepewności. |
-| `Symptom`, `Medication`, `Observation` | Przygotowane struktury objawów, leków i obserwacji. |
-| `SummaryVersion`, `SharingConsent` | Niezmienna zatwierdzona wersja oraz osobna zgoda na udostępnienie. |
-| `AgentAccess`, `AgentCredential` | Dostęp do jednego wywiadu i credential właściwy dla głosu lub tekstu. |
-| `AgentInterviewInfo`, `AgentResult` | Metadane rozmowy oraz status i wynik otrzymany z backendu. |
+| Model                                     | Odpowiedzialność                                                           |
+| ----------------------------------------- | -------------------------------------------------------------------------- |
+| `Session`, `PatientProfile`               | Tryb gościa lub konta oraz profil demonstracyjny.                          |
+| `Appointment`                             | Termin, placówka, lekarz, specjalizacja i status przygotowania wizyty.     |
+| `Interview`, `Message`, `InterviewAnswer` | Stan wywiadu, historia rozmowy i zatwierdzone odpowiedzi.                  |
+| `InterviewReport`, `ReportSection`        | Pola raportu, pochodzenie informacji oraz oznaczenie braków i niepewności. |
+| `Symptom`, `Medication`, `Observation`    | Przygotowane struktury objawów, leków i obserwacji.                        |
+| `SummaryVersion`, `SharingConsent`        | Niezmienna zatwierdzona wersja oraz osobna zgoda na udostępnienie.         |
+| `AgentAccess`, `AgentCredential`          | Dostęp do jednego wywiadu i credential właściwy dla głosu lub tekstu.      |
+| `AgentInterviewInfo`, `AgentResult`       | Metadane rozmowy oraz status i wynik otrzymany z backendu.                 |
 
 Daty mają format ISO 8601. Tokeny sesji i odpowiedzi demo nie są zapisywane w `localStorage`. Backend sam ustala powiązanie rozmowy z wizytą; identyfikatory przekazane przez klienta nie zastępują autoryzacji.
 
@@ -95,6 +98,6 @@ Testy obejmują reguły raportu i zgód, kontrakt API, linki zaproszeń, widoki 
 
 ## Obecne granice integracji
 
-Rzeczywiste rozmowy z linka mają adapter SDK i backend zapisujący wynik. Do uruchomienia wymagają skonfigurowanego agenta, kluczy serwerowych i dostępnego webhooka HTTPS. Adapter odczytuje `finalReport` i parsuje `structuredDataJson`. Wynik AI nie jest jeszcze podłączony do edycji, zatwierdzania i udostępniania przez dotychczasowy panel. Logowanie panelu pacjenta, lista wizyt i profil pozostają demonstracją. Backend ma osobne logowanie JWT dla personelu, niepodłączone do tego interfejsu.
+Rzeczywiste rozmowy wymagają skonfigurowanego agenta, kluczy serwerowych i webhooka HTTPS. Wynik zasila draft, który pacjent może edytować, uzupełniać, zatwierdzać i osobno udostępnić placówce. Konto, profil i lista wizyt korzystają z API pacjenta; JWT personelu jest osobnym mechanizmem. Głosowe dopowiedzenie do zakończonego raportu wymaga dodatkowo backendowej usługi `Transcription__Endpoint`, której obecny lokalny compose nie konfiguruje. Panel personelu i produkcyjne powiadomienia pozostają osobnym zakresem.
 
 Szczegóły konfiguracji: [README frontendu](../Frontend/README.md), [README backendu](../Backend/README.md) i [założenia integracji ElevenLabs](elevenlabs-agent-integracja-front-back.md).

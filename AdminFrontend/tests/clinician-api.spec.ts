@@ -3,8 +3,10 @@ import { createMockAppointments } from '../src/data/mock'
 
 const visitId = '22222222-2222-2222-2222-222222222222'
 const reportId = '33333333-3333-3333-3333-333333333333'
+const mockReport = createMockAppointments().find((v) => v.report)!.report!
 const report = {
-  ...createMockAppointments().find((v) => v.report)!.report!,
+  ...mockReport,
+  observations: mockReport.observations.map((item) => ({ ...item, source: 'AiObservation' })),
   visitId,
   versionId: reportId,
   versionNumber: 2,
@@ -33,6 +35,9 @@ const apiVisit = {
   visitId,
   externalVisitId: detail.externalVisitId,
   scheduledAt: detail.scheduledAt,
+  patientName: 'Jan Testowy',
+  durationMinutes: 45,
+  endsAt: '2026-10-04T09:15:00+02:00',
   status: 'Shared',
   deliveryStatus: 'Delivered',
   hasOpenSupplementationRound: false,
@@ -43,6 +48,7 @@ const receptionVisit = {
   ...apiVisit,
   serviceExpiresAt: detail.serviceExpiresAt,
   durationMinutes: 30,
+  endsAt: '2026-10-04T09:00:00+02:00',
   doctor: { ...detail.doctor, defaultRoom: '01', isActive: true },
   facility: detail.facility,
   room: '01',
@@ -61,7 +67,7 @@ test.beforeEach(async ({ page }) => {
 async function api(
   page: Page,
   role: 'Administrative' | 'Clinician',
-  options: { forbidden?: boolean; refreshFail?: boolean } = {},
+  options: { forbidden?: boolean; refreshFail?: boolean; invitationReadFail?: boolean } = {},
 ) {
   const calls: { path: string; method: string; body: unknown }[] = []
   let current = structuredClone(apiVisit)
@@ -105,12 +111,14 @@ async function api(
         adminVisit.deliveryStatus = 'Delivered'
         return send(adminVisit)
       }
-      if (path.endsWith('/invitation')) return send({ url: invitation })
+      if (path.endsWith('/invitation'))
+        return options.invitationReadFail ? send({}, 503) : send({ url: invitation })
       if (path.endsWith('/cancel')) {
         adminVisit.status = 'Cancelled'
         return route.fulfill({ status: 204 })
       }
       if (method === 'POST') {
+        invitation = 'http://127.0.0.1:5173/i/created-invitation-token'
         adminVisit = {
           ...adminVisit,
           visitId: 'createdvisit',
@@ -118,7 +126,11 @@ async function api(
           patient: { ...adminVisit.patient, name: body.patientName },
           scheduledAt: body.scheduledAt,
           status: 'NotStarted',
+          deliveryStatus: 'NotSent',
           durationMinutes: body.durationMinutes,
+          endsAt: new Date(
+            Date.parse(body.scheduledAt) + body.durationMinutes * 60_000,
+          ).toISOString(),
         }
         return send({ appointment: adminVisit, invitation: { url: invitation } }, 201)
       }
@@ -127,6 +139,9 @@ async function api(
           ...adminVisit,
           scheduledAt: body.scheduledAt,
           durationMinutes: body.durationMinutes,
+          endsAt: new Date(
+            Date.parse(body.scheduledAt) + body.durationMinutes * 60_000,
+          ).toISOString(),
           serviceExpiresAt: body.serviceExpiresAt,
           room: body.room,
           version: adminVisit.version + 1,
@@ -219,7 +234,10 @@ async function api(
           ...apiVisit,
           visitId: 'second',
           externalVisitId: 'WIZ-API-2',
+          patientName: 'Zofia Testowa',
           scheduledAt: '2026-10-04T09:30:00+02:00',
+          durationMinutes: 30,
+          endsAt: '2026-10-04T10:00:00+02:00',
           status: 'NotStarted',
         },
         {
@@ -251,6 +269,9 @@ async function api(
     expire: () => {
       expired = true
     },
+    startInterview: () => {
+      adminVisit.status = 'InProgress'
+    },
   }
 }
 
@@ -260,16 +281,20 @@ test('doctor daily queue includes visits without reports, isolates clinician, an
   const { calls } = await api(page, 'Clinician')
   await expect(page.getByTestId('doctor-visit')).toHaveCount(2)
   await expect(page.getByTestId('doctor-visit').nth(0)).toContainText('08:30')
+  await expect(page.getByTestId('doctor-visit').nth(0)).toContainText('Jan Testowy')
+  await expect(page.getByTestId('doctor-visit').nth(0)).toContainText('45 min')
+  await expect(page.getByTestId('doctor-visit').nth(0)).toContainText('do 09:15')
   await expect(page.getByTestId('doctor-visit').nth(1)).toContainText('09:30')
   await expect(page.getByText('INNY-LEKARZ')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Nowa wizyta', exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Szczegóły Wizyta WIZ-API-2', exact: true }).click()
+  await page.getByRole('button', { name: 'Szczegóły Zofia Testowa', exact: true }).click()
   await page.getByRole('tab', { name: /Raport/ }).click()
   await expect(page.getByRole('heading', { name: 'Raport jeszcze nie jest gotowy' })).toBeVisible()
   await page.getByRole('button', { name: 'Zamknij szczegóły', exact: true }).click()
-  await page.getByRole('button', { name: 'Otwórz raport Wizyta WIZ-API-1', exact: true }).click()
+  await page.getByRole('button', { name: 'Otwórz raport Jan Testowy', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Podsumowanie rozmowy' })).toBeVisible()
   await expect(page.locator('.conversation-summary')).toContainText(report.consultationReason)
+  await expect(page.getByText('Obserwacja AI', { exact: true })).toBeVisible()
   await expect(page.getByText('Przykładowy raport pacjenta')).toHaveCount(0)
   await page.getByRole('combobox', { name: 'Wersja raportu' }).click()
   await page.getByTitle(/Wersja 1/).click()
@@ -337,7 +362,7 @@ test('forbidden report clears clinical content; expired staff session returns to
   page,
 }) => {
   const { expire } = await api(page, 'Clinician', { forbidden: true, refreshFail: true })
-  await page.getByRole('button', { name: 'Otwórz raport Wizyta WIZ-API-1', exact: true }).click()
+  await page.getByRole('button', { name: 'Otwórz raport Jan Testowy', exact: true }).click()
   await expect(
     page.getByText('Brak dostępu. Raport wymaga zgody pacjenta i przypisania do lekarza.'),
   ).toBeVisible()
@@ -372,10 +397,12 @@ test('doctor demo works on today, with a summary and no API requests', async ({ 
   expect(width.page).toBeLessThanOrEqual(width.viewport + 1)
 })
 
-test('reception creates and edits a reservation using patient metadata, duration and optimistic version', async ({
+test('reception creates a reservation, immediately copies and opens its link, refreshes and edits without delivery', async ({
   page,
+  context,
 }) => {
-  const { calls } = await api(page, 'Administrative')
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const { calls, startInterview } = await api(page, 'Administrative', { invitationReadFail: true })
   await page.getByRole('button', { name: /Nowa wizyta/ }).click()
   await page.getByLabel('Imię i nazwisko pacjenta').fill('Pacjent API')
   await page.getByLabel('Telefon (do SMS)').fill('+48500100200')
@@ -391,6 +418,30 @@ test('reception creates and edits a reservation using patient metadata, duration
   expect(create.durationMinutes).toBe(30)
   expect(create.sendInvitation).toBe(false)
   expect(create.pesel).toBeNull()
+  const invitation = 'http://127.0.0.1:5173/i/created-invitation-token'
+  await expect(page.getByLabel('Link dla pacjenta')).toHaveValue(invitation)
+  await expect(
+    page.getByRole('link', { name: 'Otwórz link pacjenta', exact: true }),
+  ).toHaveAttribute('href', invitation)
+  await expect(
+    page.getByRole('link', { name: 'Otwórz link pacjenta', exact: true }),
+  ).toHaveAttribute('target', '_blank')
+  await page.getByRole('button', { name: 'Kopiuj link zaproszenia', exact: true }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(invitation)
+  await context.route(invitation, (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<main>Test nawigacji do wywiadu</main>' }),
+  )
+  const opened = page.waitForEvent('popup')
+  await page.getByRole('link', { name: 'Otwórz link pacjenta', exact: true }).click()
+  const patientPage = await opened
+  await expect(patientPage).toHaveURL(invitation)
+  await patientPage.close()
+  startInterview()
+  await page.getByRole('button', { name: 'Odśwież status', exact: true }).click()
+  await expect(page.getByRole('tabpanel', { name: 'Szczegóły' })).toContainText('Wywiad w trakcie')
+  await expect(page.getByLabel('Link dla pacjenta')).toHaveValue(invitation)
+  expect(calls.some((c) => c.path.endsWith('/invitation'))).toBe(false)
+  expect(calls.some((c) => c.path.endsWith('/invitation/send'))).toBe(false)
   await page.getByRole('button', { name: 'Zmień termin', exact: true }).click()
   await page.getByLabel('Czas wizyty (min)', { exact: true }).fill('45')
   await page.getByLabel('Gabinet', { exact: true }).fill('02')

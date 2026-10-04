@@ -87,11 +87,12 @@ export interface ReportSnapshot {
   additionalNotes: string | null
 }
 
-/** Presentation model: names, contacts and duration are NOT in AdminVisitView today. */
+/** Shared presentation model; older integration responses may omit patient metadata. */
 export interface Appointment {
   visitId: string
   externalVisitId: string
   scheduledAt: string
+  endsAt?: string | null
   serviceExpiresAt: string
   timeZone: 'Europe/Warsaw'
   assignedClinicianId: string

@@ -33,6 +33,20 @@ export interface Appointment {
   status: InterviewStatus
 }
 
+/** Real appointment metadata; missing fields never fall back to demo data. */
+export interface VisitDetails {
+  id?: string
+  externalVisitId?: string
+  scheduledAt: string
+  timeZone?: string | null
+  serviceExpiresAt?: string | null
+  doctor?: { id?: string | null; name?: string | null; specialty?: string | null } | null
+  facility?: { id?: string; name?: string | null; address?: string | null } | null
+  room?: string | null
+  visitType?: string | null
+  locationInstructions?: string | null
+}
+
 export type ReportField =
   | 'reason'
   | 'symptoms'

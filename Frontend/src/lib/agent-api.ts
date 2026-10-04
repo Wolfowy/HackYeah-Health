@@ -1,19 +1,44 @@
-import type { ConversationMode } from '../models'
+import type { ConversationMode, VisitDetails } from '../models'
+import { AgentApiError, backendResponse } from './backend-http'
+import {
+  replaceDraftCommand,
+  type ReportDraft,
+  type PatientInterview,
+  type ReportVersion,
+  type ObservationDecision,
+  type ReportIssue,
+} from './patient-report'
+export { AgentApiError } from './backend-http'
 
 export interface AgentInterviewInfo {
   id: string
   displayName: string
   visitDate: string
+  visit?: VisitDetails | null
+  sessionCount?: number
   status: 'pending' | 'in_progress' | 'processing' | 'completed'
 }
 export interface AgentResult {
   status: AgentInterviewInfo['status']
   summary: string | null
   structuredData: Record<string, unknown> | null
+  schemaVersion?: number | null
+  extractionStatus?: string
+  importStatus?: string
+  issues?: ReportIssue[]
+}
+
+/** Completed transport alone does not mean that the editable draft has been imported. */
+export function resultCanBeReviewed(result: AgentResult) {
+  return (
+    result.status === 'completed' &&
+    result.extractionStatus !== 'pending' &&
+    result.importStatus !== 'pending'
+  )
 }
 export type AgentAccess =
   | { kind: 'anonymous'; accessToken: string; interviewId: string }
-  | { kind: 'patient'; interviewId: string }
+  | { kind: 'patient'; interviewId: string; sessionToken?: string }
 export type AgentCredential = {
   sessionId: string
   provider: 'elevenlabs'
@@ -21,31 +46,6 @@ export type AgentCredential = {
   dynamicVariables: Record<string, string | number | boolean>
   conversationId?: string
 } & ({ mode: 'voice'; conversationToken: string } | { mode: 'text'; signedUrl: string })
-
-export class AgentApiError extends Error {
-  constructor(
-    public status: number,
-    public code?: string,
-  ) {
-    super(
-      status === 401 || status === 403
-        ? 'Nie masz dostępu do tej rozmowy. Otwórz ponownie link otrzymany od placówki.'
-        : status === 404
-          ? 'Nie znaleziono rozmowy. Sprawdź otrzymany link.'
-          : status === 410 ||
-              (status === 409 &&
-                (code?.startsWith('agent_invitation.') ||
-                  code === 'agent_interview.inactive' ||
-                  code === 'visit.inactive'))
-            ? 'Ta rozmowa jest zakończona albo link wygasł lub został unieważniony. Poproś placówkę o nowy.'
-            : status === 429
-              ? 'Wykorzystano limit rozpoczęć rozmowy. Spróbuj później lub poproś placówkę o nowy link.'
-              : status === 503
-                ? 'Rozmowa jest chwilowo niedostępna. Spróbuj ponownie później.'
-                : 'Nie udało się połączyć. Spróbuj ponownie.',
-    )
-  }
-}
 
 /** Application credentials stay in memory; ElevenLabs API keys never enter this client. */
 export class AgentApi {
@@ -67,31 +67,25 @@ export class AgentApi {
     method = 'GET',
     signal?: AbortSignal,
   ): Promise<T> {
-    const headers: Record<string, string> = { Accept: 'application/json' }
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
-    if (access?.kind === 'anonymous') headers.Authorization = `Bearer ${access.accessToken}`
-    else if (access?.kind === 'patient' && this.patientSessionToken)
-      headers.Authorization = `Bearer ${this.patientSessionToken}`
-    const timeout = AbortSignal.timeout(15000)
-    let response: Response
-    try {
-      response = await this.fetcher(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
-        method,
-        headers,
-        credentials: 'omit',
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      })
-    } catch (cause) {
-      if (signal?.aborted) throw cause
-      throw new Error('Nie udało się połączyć z serwerem. Sprawdź połączenie i spróbuj ponownie.')
-    }
-    if (!response.ok) {
-      const problem = (await response.json().catch(() => null)) as { code?: string } | null
-      throw new AgentApiError(response.status, problem?.code)
-    }
-    if (response.status === 204) return undefined as T
+    const response = await backendResponse(
+      this.baseUrl,
+      this.fetcher,
+      path,
+      this.token(access),
+      body,
+      method,
+      signal,
+    )
+    if (response.status === 204 || response.status === 202) return undefined as T
     return response.json() as Promise<T>
+  }
+
+  private token(access?: AgentAccess) {
+    return access?.kind === 'anonymous'
+      ? access.accessToken
+      : access?.kind === 'patient'
+        ? (access.sessionToken ?? this.patientSessionToken)
+        : ''
   }
 
   async authorizeInvitation(token: string, signal?: AbortSignal) {
@@ -111,10 +105,10 @@ export class AgentApi {
     if (!accessToken || !interviewId) throw new AgentApiError(502)
     return { interview, access: { kind: 'anonymous', accessToken, interviewId } as AgentAccess }
   }
-  async getVisitInterview(visitId: string, signal?: AbortSignal) {
+  async getVisitInterview(visitId: string, signal?: AbortSignal, sessionToken?: string) {
     const interview = await this.request<AgentInterviewInfo>(
       `/api/visits/${encodeURIComponent(visitId)}/interview`,
-      { kind: 'patient', interviewId: '' },
+      { kind: 'patient', interviewId: '', sessionToken },
       undefined,
       'GET',
       signal,
@@ -155,18 +149,140 @@ export class AgentApi {
       'POST',
     )
   }
-  async getResult(access: AgentAccess, signal?: AbortSignal): Promise<AgentResult> {
-    const path = `/api/interviews/${encodeURIComponent(access.interviewId)}/result`
-    const result = await this.request<{
-      status: AgentInterviewInfo['status']
-      finalReport: string | null
-      structuredDataJson: string | null
-    }>(path, access, undefined, 'GET', signal)
+  private mapResult(result: {
+    status: AgentInterviewInfo['status']
+    finalReport: string | null
+    structuredDataJson?: string | null
+    structuredData?: Record<string, unknown> | null
+    schemaVersion?: number | null
+    extractionStatus?: string
+    importStatus?: string
+    issues?: ReportIssue[]
+  }): AgentResult {
+    let data = result.structuredData ?? null
+    if (!data && result.structuredDataJson) {
+      try {
+        data = JSON.parse(result.structuredDataJson)
+      } catch {
+        /* Raw provider JSON is not necessarily valid. */
+      }
+    }
     return {
       status: result.status,
       summary: result.finalReport,
-      structuredData: result.structuredDataJson ? JSON.parse(result.structuredDataJson) : null,
+      structuredData: data,
+      schemaVersion: result.schemaVersion,
+      extractionStatus: result.extractionStatus,
+      importStatus: result.importStatus,
+      issues: result.issues ?? [],
     }
+  }
+  async getResult(access: AgentAccess, signal?: AbortSignal): Promise<AgentResult> {
+    return this.mapResult(
+      await this.request(
+        `/api/interviews/${encodeURIComponent(access.interviewId)}/result`,
+        access,
+        undefined,
+        'GET',
+        signal,
+      ),
+    )
+  }
+  async retryImport(access: AgentAccess) {
+    return this.mapResult(
+      await this.request(
+        `/api/interviews/${encodeURIComponent(access.interviewId)}/result/retry-import`,
+        access,
+        {},
+        'POST',
+      ),
+    )
+  }
+  recoverSession(access: AgentAccess, sessionId: string) {
+    return this.request<void>(
+      `/api/interview-sessions/${encodeURIComponent(sessionId)}/recover`,
+      access,
+      {},
+      'POST',
+    )
+  }
+  getPatientInterview(access: AgentAccess, signal?: AbortSignal) {
+    return this.request<PatientInterview>('/api/v1/interview', access, undefined, 'GET', signal)
+  }
+  saveDraft(access: AgentAccess, draft: ReportDraft) {
+    return this.request<PatientInterview>(
+      '/api/v1/interview/draft',
+      access,
+      replaceDraftCommand(draft),
+      'PUT',
+    )
+  }
+  decideObservation(
+    access: AgentAccess,
+    id: string,
+    decision: ObservationDecision,
+    editedText: string | null = null,
+  ) {
+    return this.request<PatientInterview>(
+      `/api/v1/interview/observations/${encodeURIComponent(id)}/decision`,
+      access,
+      { decision, editedText },
+      'PUT',
+    )
+  }
+  completeInterview(access: AgentAccess) {
+    return this.request<void>('/api/v1/interview/complete', access, {}, 'POST')
+  }
+  approveReport(access: AgentAccess, confirmIncompleteReport: boolean) {
+    return this.request<ReportVersion>(
+      '/api/v1/interview/approve',
+      access,
+      { confirmIncompleteReport, acceptAllObservations: true, shareWithFacility: true },
+      'POST',
+    )
+  }
+  setConsent(access: AgentAccess, granted: boolean) {
+    return this.request<void>('/api/v1/interview/consent', access, { granted }, 'PUT')
+  }
+  regeneratePdf(access: AgentAccess) {
+    return this.request<void>('/api/v1/interview/report/regenerate-pdf', access, {}, 'POST')
+  }
+  answerSupplementation(
+    access: AgentAccess,
+    answers: { questionId: string; answer: string; mode: 'Text' | 'Voice' }[],
+  ) {
+    return this.request<void>(
+      '/api/v1/interview/supplementation-round/answers',
+      access,
+      answers,
+      'POST',
+    )
+  }
+  async transcribe(access: AgentAccess, audio: Blob, signal?: AbortSignal) {
+    const body = new FormData()
+    const extension =
+      audio.type === 'audio/mp4' ? 'mp4' : audio.type === 'audio/ogg' ? 'ogg' : 'webm'
+    body.append('audio', audio, `dopowiedzenie.${extension}`)
+    const response = await backendResponse(
+      this.baseUrl,
+      this.fetcher,
+      '/api/v1/interview/voice/transcribe',
+      this.token(access),
+      body,
+      'POST',
+      signal,
+      60000,
+    )
+    return ((await response.json()) as { text: string }).text
+  }
+  async downloadReport(access: AgentAccess, format: 'pdf' | 'json') {
+    const response = await backendResponse(
+      this.baseUrl,
+      this.fetcher,
+      `/api/v1/interview/report${format === 'pdf' ? '.pdf' : ''}`,
+      this.token(access),
+    )
+    return response.blob()
   }
 }
 

@@ -17,6 +17,8 @@ Solution zawiera `DocPrep.Domain`, `DocPrep.Application`, `DocPrep.Infrastructur
 
 ## Uruchomienie
 
+Najprostsze uruchomienie **całego systemu, razem z oboma frontami**, jest opisane w [głównym README](../README.md#uruchomienie-lokalne--cały-system-w-dockerze). Poniższe warianty dotyczą samego backendu.
+
 ### Istniejący PostgreSQL na porcie 2142
 
 Lokalny wariant uruchamia API i Redis, korzystając z istniejącego PostgreSQL na komputerze. Z katalogu `Backend`:
@@ -60,10 +62,10 @@ Backend rozdziela cztery rodzaje poświadczeń:
 
 Konta demonstracyjne panelu, tworzone tylko w środowisku `Development`:
 
-| Rola | Login | Hasło |
-|---|---|---|
-| Administracja | `admin@docprep.local` | `DocPrepDemo!2026` |
-| Lekarz | `doctor@docprep.local` | `DocPrepDemo!2026` |
+| Rola          | Login                  | Hasło              |
+| ------------- | ---------------------- | ------------------ |
+| Administracja | `admin@docprep.local`  | `DocPrepDemo!2026` |
+| Lekarz        | `doctor@docprep.local` | `DocPrepDemo!2026` |
 
 ```http
 POST /api/v1/auth/login
@@ -76,11 +78,11 @@ Frontend używa `accessToken` jako `Authorization: Bearer ...`. Odnowienie i wyl
 
 Demo integracji system–system ma trzy role:
 
-| Rola | `X-Api-Key` |
-|---|---|
-| Administracja | `demo-admin-key` |
-| Lekarz | `demo-clinician-key` |
-| System placówki | `demo-system-key` |
+| Rola            | `X-Api-Key`          |
+| --------------- | -------------------- |
+| Administracja   | `demo-admin-key`     |
+| Lekarz          | `demo-clinician-key` |
+| System placówki | `demo-system-key`    |
 
 Wartości są przeznaczone wyłącznie do lokalnego demo. Klucze integracyjne, connection stringi, `Security__PatientHmacKey`, `Security__EncryptionKey` i `Authentication__Jwt__SigningKey` muszą być dostarczone jako sekrety środowiska poza `Development`. Klucz JWT musi być losowym kluczem co najmniej 256-bitowym zakodowanym Base64.
 
@@ -108,6 +110,20 @@ Frontend powinien po wymianie linku natychmiast usunąć token linku z paska adr
 - Cofnięcie zgody natychmiast blokuje kolejne pobrania.
 - JSON i PDF są zapisane z tego samego snapshotu i mają wspólny `VersionId`.
 - PESEL służy jedynie do tworzenia HMAC correlation key; wartość źródłowa jest szyfrowana.
+
+## Zatwierdzenie i udostępnienie całego raportu
+
+Frontend pacjenta wysyła jedno `POST /api/v1/interview/approve` z `acceptAllObservations: true` i `shareWithFacility: true`. Pole `confirmIncompleteReport` jest `true`, gdy pacjent zatwierdza raport z widocznymi brakami. Nie wymaga to osobnego żądania zgody ani decyzji o każdej obserwacji. Akceptowane są tylko oczekujące obserwacje; wcześniejsze odrzucenia i zaakceptowane poprawki są zachowane.
+
+Backend zapisuje niezmienny snapshot przed generowaniem PDF, a zgodę i udostępnienie dopiero po udanym renderowaniu. Błąd PDF pozostawia zatwierdzoną treść do ponowienia, bez udostępniania niedokończonej wersji. UI ponawia PDF i udostępnienie bez tworzenia kolejnego snapshotu. Starsze żądania bez nowych flag zachowują dotychczasowe zachowanie; endpoint `/consent` nadal obsługuje cofnięcie zgody.
+
+## PDF: poprawka dla Dockera i weryfikacja treści
+
+QuestPDF `2024.3.0` generował na lokalnym Dockerze Linux ARM64 biały raport o rozmiarze 788 B mimo odpowiedzi `200 application/pdf`. Ten sam renderer działał na macOS. Zależność zaktualizowano do wersji poprawkowej `2024.3.10`; daty początku objawów i chronologii mają jednoznaczny format `yyyy-MM-dd` niezależnie od języka systemu.
+
+Test renderera odczytuje tekst za pomocą testowej biblioteki PdfPig i sprawdza identyfikator wersji, dwie pozycje objawów i leków, pozostałe sekcje oraz polskie znaki. Test przepływu API sprawdza też treść PDF pobranego przez lekarza i zgodność pliku z wersją pacjenta. Test PDF jest wykonywany podczas budowania obrazu Docker, więc pusty dokument blokuje budowę.
+
+Po odbudowie API istniejący pusty PDF należy ponownie wygenerować przez `POST /api/v1/interview/report/regenerate-pdf` z uprawnioną sesją pacjenta dla danej wizyty. Operacja używa zapisanego, zatwierdzonego snapshotu i zachowuje `VersionId`; nie wymaga ponownego zatwierdzenia ani nowej rozmowy ElevenLabs. Aktualizacja nie wymaga migracji bazy.
 
 ## Komendy developerskie
 

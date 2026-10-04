@@ -24,6 +24,7 @@ import {
   PhoneOutlined,
   SendOutlined,
   ReloadOutlined,
+  ExportOutlined,
 } from '@ant-design/icons'
 import type { Appointment, ContactChannel, DataMode, StaffUser, UpdateAppointment } from '../models'
 import { canSendInvitation } from '../lib/appointments'
@@ -60,7 +61,7 @@ export function AppointmentDrawer({
 }) {
   const { message } = App.useApp()
   const [channel, setChannel] = useState<ContactChannel>(visit.invitation.channel || 'Sms')
-  const [link, setLink] = useState('')
+  const [link, setLink] = useState(visit.invitationUrl || '')
   const [linkError, setLinkError] = useState('')
   const [regenerate, setRegenerate] = useState(false)
   const [contact, setContact] = useState('')
@@ -79,6 +80,11 @@ export function AppointmentDrawer({
   useEffect(() => {
     let cancelled = false
     if (!admin || demo || !active) return
+    setLinkError('')
+    if (visit.invitationUrl) {
+      setLink(visit.invitationUrl)
+      return
+    }
     receptionService
       .getInvitation(visit.visitId)
       .then((url) => {
@@ -179,11 +185,17 @@ export function AppointmentDrawer({
           </span>
           <span>
             <ClockCircleOutlined /> {formatTime(visit.scheduledAt)}
+            {visit.endsAt ? `–${formatTime(visit.endsAt)}` : ''}
             {visit.durationMinutes ? ` · ${visit.durationMinutes} min` : ''}
           </span>
         </div>
         <div className="visit-actions">
-          <Button icon={<ReloadOutlined />} loading={busy} onClick={refresh}>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={busy}
+            onClick={refresh}
+            aria-label="Odśwież status"
+          >
             Odśwież status
           </Button>
           {admin && visit.status !== 'Cancelled' && (
@@ -292,6 +304,17 @@ export function AppointmentDrawer({
                           aria-label="Kopiuj link zaproszenia"
                         />
                       </Space.Compact>
+                      <Button
+                        type="link"
+                        icon={<ExportOutlined />}
+                        href={active && url ? url : undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        disabled={!active || !url}
+                        aria-label="Otwórz link pacjenta"
+                      >
+                        Otwórz wywiad
+                      </Button>
                       <p className="invitation-demo-note">
                         {demo
                           ? 'Link demonstracyjny — nie uruchamia prawdziwego wywiadu.'

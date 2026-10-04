@@ -20,7 +20,8 @@ public interface IDocPrepStore
     Task<PatientAccessGrant?> FindAccessByLinkHash(string hash, CancellationToken ct);
     Task<PatientAccessGrant?> FindAccessByCodeHash(string hash, CancellationToken ct);
     Task<IReadOnlyList<PatientAccessGrant>> GetAccessGrants(Guid visitId, CancellationToken ct);
-    Task<IReadOnlyList<VisitProcess>> GetFacilityVisits(Guid facilityId, CancellationToken ct);
+    Task<IReadOnlyList<VisitProcess>> GetFacilityVisits(Guid facilityId, CancellationToken ct, string? clinicianId = null);
+    Task<ReceptionDetails?> GetReceptionDetails(Guid visitId, CancellationToken ct);
     Task<IReadOnlyList<VisitProcess>> GetPatientVisits(Guid patientIdentityId, CancellationToken ct);
     Task<IReadOnlyList<ReportVersion>> GetVersions(Guid visitId, CancellationToken ct);
     Task<ReportVersion?> GetVersion(Guid visitId, Guid versionId, CancellationToken ct);

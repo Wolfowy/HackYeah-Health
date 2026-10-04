@@ -15,6 +15,9 @@ export interface AdminVisitDto {
   visitId: string
   externalVisitId: string
   scheduledAt: string
+  patientName?: string | null
+  durationMinutes?: number | null
+  endsAt?: string | null
   status: VisitStatus
   deliveryStatus: DeliveryStatus
   hasOpenSupplementationRound: boolean
@@ -34,6 +37,7 @@ export interface ReceptionVisitDto {
   scheduledAt: string
   serviceExpiresAt: string
   durationMinutes: number
+  endsAt?: string | null
   doctor: { id: string; name: string; specialty: string; defaultRoom: string | null } | null
   facility: { id: string; name: string | null; address: string | null }
   room: string | null
@@ -73,6 +77,7 @@ export function mapVisit(dto: AdminVisitDto, facilityId: string): Appointment {
     visitId: dto.visitId,
     externalVisitId: dto.externalVisitId,
     scheduledAt: dto.scheduledAt,
+    endsAt: dto.endsAt,
     serviceExpiresAt: detail?.serviceExpiresAt || dto.scheduledAt,
     timeZone: 'Europe/Warsaw',
     assignedClinicianId: detail?.doctor.id || '',
@@ -93,8 +98,8 @@ export function mapVisit(dto: AdminVisitDto, facilityId: string): Appointment {
     status: dto.status,
     deliveryStatus: dto.deliveryStatus,
     hasOpenSupplementationRound: dto.hasOpenSupplementationRound,
-    patient: { name: `Wizyta ${dto.externalVisitId}`, phone: '', email: '' },
-    durationMinutes: null,
+    patient: { name: dto.patientName || `Wizyta ${dto.externalVisitId}`, phone: '', email: '' },
+    durationMinutes: dto.durationMinutes ?? null,
     locationInstructions: detail?.locationInstructions || null,
     invitation: { token: '', channel: 'Sms', lastSentAt: null },
     report: null,
@@ -191,6 +196,11 @@ export function createApiService(http = new StaffHttp()): ReceptionService {
         { method: 'POST', body: JSON.stringify({ contact }) },
       )
       invitations.set(id, { token: result.interviewInvitationToken, channel, lastSentAt: null })
+      if (admin())
+        links.set(
+          id,
+          `${(import.meta.env.VITE_PATIENT_FRONTEND_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')}/i/${encodeURIComponent(result.interviewInvitationToken)}`,
+        )
       return getAppointment(id)
     },
     getAppointment,
@@ -264,11 +274,6 @@ export function createApiService(http = new StaffHttp()): ReceptionService {
         channel,
         lastSentAt: new Date().toISOString(),
       })
-      if (admin())
-        links.set(
-          id,
-          `${(import.meta.env.VITE_PATIENT_FRONTEND_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')}/i/${encodeURIComponent(result.interviewInvitationToken)}`,
-        )
       return getAppointment(id)
     },
     async updateAppointment(visit, input) {

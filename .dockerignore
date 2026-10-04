@@ -1,0 +1,15 @@
+.git
+.agents
+.codex
+**/node_modules
+**/dist
+**/bin
+**/obj
+**/.env
+**/.env.*
+**/.local
+**/.dotnet-cli
+**/test-results
+**/playwright-report
+**/TestResults
+**/.DS_Store

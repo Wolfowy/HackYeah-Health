@@ -17,7 +17,7 @@ test('ponowne otwarcie linku wysyła zapisany kontekst do nowej sesji ElevenLabs
           window.resumedCredential = options.conversationToken;
           window.resumedVariables = options.dynamicVariables;
           window.resumedContext = [];
-          options.onConnect?.();
+          options.onConnect?.({conversationId:'conv_resume'});
           options.onModeChange({mode:'listening'});
           return {
             getId: () => 'conv_resume', getInputVolume: () => 0, getOutputVolume: () => 0,
@@ -67,7 +67,7 @@ test('ponowne otwarcie linku wysyła zapisany kontekst do nowej sesji ElevenLabs
   })
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     // Reopen the original invitation: authorization removes the secret from the address bar.
-    await page.goto('/i/test-resume-invitation')
+    await page.goto('/i/test-resume-invitation', { waitUntil: 'domcontentloaded' })
     await page.getByRole('button', { name: 'Rozpocznij rozmowę', exact: true }).click()
     await expect
       .poll(() =>

@@ -12,16 +12,30 @@ import {
   VolumeX,
 } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
-import type { AgentAccess } from '../lib/agent-api'
+import type { AgentAccess, AgentInterviewInfo } from '../lib/agent-api'
+import { displayAgentText } from '../lib/agent-text'
 import { Orb } from './Orb'
+import { ReportReview } from './ReportReview'
 
-export function LiveConversation({ access }: { access: AgentAccess }) {
-  const agent = useAgentConversation(access)
+export function LiveConversation({
+  access,
+  initialStatus = 'pending',
+}: {
+  access: AgentAccess
+  initialStatus?: AgentInterviewInfo['status']
+}) {
+  const agent = useAgentConversation(access, initialStatus)
   const [input, setInput] = useState('')
   const endOfChat = useRef<HTMLDivElement>(null)
   const busy = ['requesting_microphone', 'connecting', 'ending'].includes(agent.phase)
   const ended = agent.phase === 'processing' || agent.phase === 'completed'
-  const latestQuestion = [...agent.messages]
+  const displayMessages = agent.messages
+    .map((message) => ({
+      ...message,
+      text: message.role === 'assistant' ? displayAgentText(message.text) : message.text,
+    }))
+    .filter((message) => message.text.trim())
+  const latestQuestion = [...displayMessages]
     .reverse()
     .find((message) => message.role === 'assistant')?.text
   useEffect(() => {
@@ -75,19 +89,45 @@ export function LiveConversation({ access }: { access: AgentAccess }) {
               ? 'Dziękuję za rozmowę.'
               : 'Przygotowuję Twoje podsumowanie…'}
           </h2>
-          {agent.result?.summary ? (
-            <div className="agent-result">
-              <span className="small-icon">
-                <Check size={18} />
-              </span>
-              <p>{agent.result.summary}</p>
-            </div>
+          {agent.phase === 'completed' && agent.result ? (
+            <ReportReview
+              access={access}
+              result={agent.result}
+              onResultRefresh={agent.refreshResult}
+            />
           ) : (
-            <p>Możesz już zakończyć rozmowę. Wynik pojawi się po przetworzeniu wywiadu.</p>
+            <>
+              <p>Wynik pojawi się po przetworzeniu wywiadu.</p>
+              <div className="agent-summary-actions">
+                <button className="button primary" disabled>
+                  <Check size={17} />
+                  Zatwierdź i udostępnij raport
+                </button>
+                <div className="agent-supplement-actions">
+                  <button className="button secondary" disabled>
+                    <Mic size={17} />
+                    Dopowiedz głosowo
+                  </button>
+                  <button className="button secondary" disabled>
+                    <MessageCircle size={17} />
+                    Dopowiedz na czacie
+                  </button>
+                </div>
+              </div>
+              <button className="text-button muted" onClick={() => void agent.refreshResult()}>
+                Sprawdź podsumowanie
+              </button>
+              {agent.lastSessionId && (
+                <button
+                  className="text-button"
+                  disabled={agent.recovering}
+                  onClick={() => void agent.recoverResult()}
+                >
+                  {agent.recovering ? 'Odzyskuję wynik…' : 'Odzyskaj wynik rozmowy'}
+                </button>
+              )}
+            </>
           )}
-          <button className="button secondary" onClick={() => void agent.refreshResult()}>
-            Sprawdź podsumowanie
-          </button>
         </div>
       ) : agent.mode === 'voice' ? (
         <div className="voice-experience live-voice">
@@ -142,6 +182,15 @@ export function LiveConversation({ access }: { access: AgentAccess }) {
                 <PhoneOff size={20} />
               </button>
             )}
+            {(agent.phase === 'connecting' || agent.phase === 'requesting_microphone') && (
+              <button
+                className="pause-button end-call"
+                onClick={agent.cancelStart}
+                aria-label="Anuluj łączenie"
+              >
+                <PhoneOff size={20} />
+              </button>
+            )}
             <button
               className="text-button switch-to-text"
               disabled={busy}
@@ -159,7 +208,7 @@ export function LiveConversation({ access }: { access: AgentAccess }) {
             aria-live="polite"
             aria-label="Historia rozmowy"
           >
-            {agent.messages.map((message) => (
+            {displayMessages.map((message) => (
               <div key={message.id} className={`chat-message ${message.role}`}>
                 <div>
                   <div className="chat-bubble">{message.text}</div>
@@ -169,13 +218,20 @@ export function LiveConversation({ access }: { access: AgentAccess }) {
             <div ref={endOfChat} />
           </div>
           {agent.phase !== 'connected' ? (
-            <button
-              className="button primary chat-start"
-              disabled={busy}
-              onClick={() => void agent.start('text')}
-            >
-              {busy && <LoaderCircle size={16} className="spin" />}Rozpocznij czat
-            </button>
+            <div className="chat-connection-controls">
+              <button
+                className="button primary chat-start"
+                disabled={busy}
+                onClick={() => void agent.start('text')}
+              >
+                {busy && <LoaderCircle size={16} className="spin" />}Rozpocznij czat
+              </button>
+              {agent.phase === 'connecting' && (
+                <button className="text-button muted" onClick={agent.cancelStart}>
+                  Anuluj łączenie
+                </button>
+              )}
+            </div>
           ) : (
             <>
               <form

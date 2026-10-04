@@ -123,11 +123,20 @@ public static partial class Endpoints
         }).Produces<InvitationResult>().ProducesProblem(400).ProducesProblem(401).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
         integration.MapGet("/visits", async (DateTimeOffset? from, DateTimeOffset? to, Domain.Visits.VisitStatus? status,
             int page, int pageSize, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
-            Results.Ok(await service.Search(Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician).FacilityId,
-                from, to, status, page == 0 ? 1 : page, pageSize == 0 ? 25 : pageSize, ct)))
+        {
+            var facility = Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician);
+            ctx.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(await service.Search(facility.FacilityId, from, to, status,
+                page == 0 ? 1 : page, pageSize == 0 ? 25 : pageSize, ct, AssignedClinicianScope(facility)));
+        })
             .Produces<PagedResult<AdminVisitView>>().ProducesProblem(401).ProducesProblem(403);
         integration.MapGet("/visits/{id:guid}/status", async (Guid id, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
-            Results.Ok((await service.Dashboard(Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician).FacilityId, ct)).SingleOrDefault(x => x.VisitId == id) ?? throw new NotFoundError())).Produces<AdminVisitView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
+        {
+            var facility = Facility(ctx, FacilityRole.Administrative, FacilityRole.System, FacilityRole.Clinician);
+            ctx.Response.Headers.CacheControl = "no-store";
+            return Results.Ok((await service.Dashboard(facility.FacilityId, ct, AssignedClinicianScope(facility)))
+                .SingleOrDefault(x => x.VisitId == id) ?? throw new NotFoundError());
+        }).Produces<AdminVisitView>().ProducesProblem(401).ProducesProblem(403).ProducesProblem(404);
         integration.MapPut("/visits/{id:guid}", async (Guid id, UpdateVisitRequest request, HttpContext ctx, IntegrationService service, CancellationToken ct) =>
         {
             ValidateVisitDetails(request.ScheduledAt, request.ServiceExpiresAt, request.TimeZone, request.VisitType);
@@ -352,6 +361,10 @@ public static partial class Endpoints
         if (request.ScheduledAt == default || request.ServiceExpiresAt == default) throw new ArgumentException("Visit dates are required.");
         ValidateVisitDetails(request.ScheduledAt, request.ServiceExpiresAt, request.TimeZone, request.VisitType);
     }
+
+    private static string? AssignedClinicianScope(FacilityRequestContext facility) =>
+        facility.Role != FacilityRole.Clinician ? null :
+        string.IsNullOrWhiteSpace(facility.ClinicianId) ? throw new ForbiddenError("A clinician identity is required.") : facility.ClinicianId;
 
     private static void ValidateVisitDetails(DateTimeOffset scheduledAt, DateTimeOffset serviceExpiresAt, string timeZone, string visitType)
     {

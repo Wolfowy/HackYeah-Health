@@ -1,0 +1,80 @@
+name: docprep-system
+
+services:
+  api:
+    build: ./Backend
+    env_file: ./Backend/.env
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=docprep;Username=docprep;Password=${POSTGRES_PASSWORD:-docprep_dev}
+      ConnectionStrings__Redis: redis:6379
+      ElevenLabs__ApiKey: ${ELEVENLABS_API_KEY:-}
+      ElevenLabs__AgentId: ${ELEVENLABS_AGENT_ID:-}
+      ElevenLabs__Environment: ${ELEVENLABS_ENVIRONMENT:-production}
+      ElevenLabs__WebhookSecret: ${ELEVENLABS_WEBHOOK_SECRET:-}
+      Notifications__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://127.0.0.1:5173}
+      Notifications__ProviderUrl: ${NOTIFICATIONS_PROVIDER_URL:-}
+      Notifications__ApiKey: ${NOTIFICATIONS_API_KEY:-}
+    ports:
+      - "${DOCPREP_BIND_ADDRESS:-127.0.0.1}:${DOCPREP_API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  patient:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        APP_DIR: Frontend
+    ports:
+      - "${DOCPREP_BIND_ADDRESS:-127.0.0.1}:${DOCPREP_PATIENT_PORT:-5173}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  panel:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        APP_DIR: AdminFrontend
+    ports:
+      - "${DOCPREP_BIND_ADDRESS:-127.0.0.1}:${DOCPREP_PANEL_PORT:-5174}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: docprep
+      POSTGRES_USER: docprep
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docprep_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docprep -d docprep"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

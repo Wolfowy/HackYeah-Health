@@ -24,6 +24,7 @@ import { Profile } from './components/Profile'
 import { Modal } from './components/Modal'
 import { StandaloneConversation } from './components/StandaloneConversation'
 import { standaloneRoute } from './lib/routes'
+import { AccountWorkspace } from './components/AccountWorkspace'
 
 const paths: Record<Page, string> = {
   interview: 'wywiad',
@@ -45,7 +46,13 @@ export default function App() {
   const [directRoute] = useState(() =>
     standaloneRoute(window.location.pathname, window.location.hash),
   )
-  return directRoute ? <StandaloneConversation route={directRoute} /> : <WorkspaceApp />
+  return directRoute ? (
+    <StandaloneConversation route={directRoute} />
+  ) : window.location.pathname === '/demo' ? (
+    <WorkspaceApp />
+  ) : (
+    <AccountWorkspace />
+  )
 }
 
 function WorkspaceApp() {

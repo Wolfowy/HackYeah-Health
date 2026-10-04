@@ -15,7 +15,8 @@ public sealed record InvitationResult(Guid VisitId, string LinkToken, string Vis
 public sealed record ExchangeAccessResult(string SessionToken, Guid VisitId, DateTimeOffset ExpiresAt);
 public sealed record AdminVisitView(Guid VisitId, string ExternalVisitId, DateTimeOffset ScheduledAt, VisitStatus Status,
     string DeliveryStatus, bool HasOpenSupplementationRound, VisitDetails? Visit = null,
-    Guid? InterviewId = null, string? InterviewStatus = null, string? ExtractionStatus = null, string? ImportStatus = null);
+    Guid? InterviewId = null, string? InterviewStatus = null, string? ExtractionStatus = null, string? ImportStatus = null,
+    string? PatientName = null, int DurationMinutes = 30, DateTimeOffset EndsAt = default);
 public sealed record VisitDoctor(string? Id, string? Name, string? Specialty);
 public sealed record VisitFacility(Guid Id, string? Name, string? Address);
 public sealed record VisitDetails(Guid Id, string ExternalVisitId, DateTimeOffset ScheduledAt, string TimeZone,
@@ -44,7 +45,8 @@ public sealed record ReplaceDraftCommand(string ConsultationReason, IReadOnlyLis
     int? ExpectedRevision = null);
 public sealed record SubmitAnswerCommand(string Question, string Answer, AnswerMode Mode);
 public sealed record ObservationDecisionCommand(ObservationDecision Decision, string? EditedText);
-public sealed record ApproveReportCommand(bool ConfirmIncompleteReport);
+public sealed record ApproveReportCommand(bool ConfirmIncompleteReport, bool AcceptAllObservations = false,
+    bool ShareWithFacility = false);
 public sealed record ConsentCommand(bool Granted);
 public sealed record AddClinicianQuestionsCommand(string ClinicianId, IReadOnlyList<string> Questions);
 public sealed record SupplementationAnswerCommand(Guid QuestionId, string Answer, AnswerMode Mode);

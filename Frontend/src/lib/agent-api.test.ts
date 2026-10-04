@@ -74,3 +74,85 @@ test('patient access uses its own interview and scoped session; binding and cont
     'Bearer patient-session-token',
   )
 })
+
+test('typed result preserves failed extraction and malformed legacy JSON is safe', async () => {
+  const api = new AgentApi('', (async () =>
+    Response.json({
+      status: 'completed',
+      finalReport: 'Raport',
+      structuredDataJson: '{broken',
+      structuredData: null,
+      schemaVersion: 1,
+      extractionStatus: 'failed',
+      importStatus: 'failed',
+      issues: [{ fieldPath: 'symptoms', kind: 'missing', message: 'Brak danych' }],
+    })) as typeof fetch)
+  const result = await api.getResult({ kind: 'anonymous', accessToken: 'token', interviewId: 'id' })
+  assert.equal(result.structuredData, null)
+  assert.equal(result.importStatus, 'failed')
+  assert.equal(result.issues?.[0].fieldPath, 'symptoms')
+  const typed = new AgentApi('', (async () =>
+    Response.json({
+      status: 'completed',
+      finalReport: null,
+      structuredData: { schemaVersion: 1 },
+      structuredDataJson: '{broken',
+      extractionStatus: 'ready',
+    })) as typeof fetch)
+  assert.deepEqual(
+    (await typed.getResult({ kind: 'anonymous', accessToken: 'token', interviewId: 'id' }))
+      .structuredData,
+    { schemaVersion: 1 },
+  )
+})
+
+test('report approval accepts the whole report and grants sharing with the invitation JWT', async () => {
+  const requests: { path: string; body: unknown; auth: string | null }[] = []
+  const api = new AgentApi('', (async (url, options) => {
+    requests.push({
+      path: String(url),
+      body: options?.body ? JSON.parse(String(options.body)) : null,
+      auth: new Headers(options?.headers).get('Authorization'),
+    })
+    return String(url).endsWith('/approve')
+      ? Response.json({ versionNumber: 1 })
+      : new Response(null, { status: 204 })
+  }) as typeof fetch)
+  const access: AgentAccess = { kind: 'anonymous', interviewId: 'id', accessToken: 'review-jwt' }
+  await api.approveReport(access, true)
+  assert.deepEqual(
+    requests.map((item) => item.path),
+    ['/api/v1/interview/approve'],
+  )
+  assert.deepEqual(requests[0].body, {
+    confirmIncompleteReport: true,
+    acceptAllObservations: true,
+    shareWithFacility: true,
+  })
+  assert.ok(requests.every((item) => item.auth === 'Bearer review-jwt'))
+  await api.setConsent(access, false)
+  assert.deepEqual(requests[1].body, { granted: false })
+})
+
+test('completed transport awaits extraction/import, while failed extraction opens an explicit review', async () => {
+  const { resultCanBeReviewed } = await import('./agent-api')
+  const result = { status: 'completed', summary: 'Opis', structuredData: null } as const
+  assert.equal(
+    resultCanBeReviewed({ ...result, extractionStatus: 'ready', importStatus: 'pending' }),
+    false,
+  )
+  assert.equal(
+    resultCanBeReviewed({ ...result, extractionStatus: 'pending', importStatus: 'ready' }),
+    false,
+  )
+  assert.equal(
+    resultCanBeReviewed({ ...result, extractionStatus: 'partial', importStatus: 'ready' }),
+    true,
+  )
+  assert.equal(
+    resultCanBeReviewed({ ...result, extractionStatus: 'failed', importStatus: 'failed' }),
+    true,
+  )
+  assert.equal(resultCanBeReviewed(result), true)
+  assert.equal(resultCanBeReviewed({ ...result, status: 'processing' }), false)
+})

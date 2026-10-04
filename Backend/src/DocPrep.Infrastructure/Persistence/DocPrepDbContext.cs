@@ -134,6 +134,7 @@ public sealed class DocPrepDbContext(DbContextOptions<DocPrepDbContext> options)
         });
         b.Entity<DeliveryAttempt>(e => { e.ToTable("delivery_attempts"); e.HasKey(x => x.Id); e.Property(x => x.Status).HasConversion<string>(); e.HasOne<VisitProcess>().WithMany().HasForeignKey(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<InterviewDraft>(e => { e.ToTable("interview_drafts"); e.HasKey(x => x.Id); e.HasIndex(x => x.VisitProcessId).IsUnique(); e.Property(x => x.MedicationsState).HasConversion<string>(); e.Property(x => x.AllergiesState).HasConversion<string>(); e.Property(x => x.ChronicConditionsState).HasConversion<string>(); e.HasOne<VisitProcess>().WithOne().HasForeignKey<InterviewDraft>(x => x.VisitProcessId).OnDelete(DeleteBehavior.Cascade); });
+        b.Entity<InterviewDraft>().Property(x => x.Revision).IsConcurrencyToken();
         Child<InterviewAnswer>(b, "interview_answers", "InterviewDraftId", nameof(InterviewDraft.Answers));
         Child<Symptom>(b, "symptoms", "InterviewDraftId", nameof(InterviewDraft.Symptoms));
         Child<Medication>(b, "medications", "InterviewDraftId", nameof(InterviewDraft.Medications));

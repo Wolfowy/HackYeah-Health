@@ -119,7 +119,7 @@ internal sealed class QuestReportRenderer : IReportRenderer
         page.Content().PaddingVertical(8).Column(c =>
         {
             Section(c, "Powód konsultacji", [report.ConsultationReason]);
-            Section(c, "Objawy", report.Symptoms.Select(x => $"{x.Name}: od {x.StartedOn?.ToString() ?? "nieznane"}, częstość {x.Frequency ?? "nieznana"}, nasilenie {x.Severity?.ToString() ?? "nieznane"}/10. {x.DailyImpact} {x.Description} Chronologia: {string.Join("; ", x.Timeline.Select(t => $"{t.OccurredOn?.ToString() ?? t.Period ?? "czas nieznany"}: {t.Description}"))}"));
+            Section(c, "Objawy", report.Symptoms.Select(x => $"{x.Name}: od {x.StartedOn?.ToString("yyyy-MM-dd") ?? "nieznane"}, częstość {x.Frequency ?? "nieznana"}, nasilenie {x.Severity?.ToString() ?? "nieznane"}/10. {x.DailyImpact} {x.Description} Chronologia: {string.Join("; ", x.Timeline.Select(t => $"{t.OccurredOn?.ToString("yyyy-MM-dd") ?? t.Period ?? "czas nieznany"}: {t.Description}"))}"));
             Section(c, "Leki", report.Medications.Select(x => $"{x.Name}, dawka: {x.Dose ?? "nieznana"}, schemat: {x.Schedule ?? "nieznany"}, powód: {x.Reason ?? "niepodany"}"));
             Section(c, "Alergie", report.Allergies.Select(x => $"{x.Substance}: {x.Reaction ?? "reakcja nieznana"}"));
             Section(c, "Choroby przewlekłe", report.ChronicConditions.Select(x => $"{x.Name}: {x.Description}"));

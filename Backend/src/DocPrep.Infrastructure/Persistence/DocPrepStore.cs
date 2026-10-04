@@ -39,7 +39,11 @@ internal sealed class DocPrepStore(DocPrepDbContext db) : IDocPrepStore
     public Task<PatientAccessGrant?> FindAccessByLinkHash(string hash, CancellationToken ct) => db.AccessGrants.SingleOrDefaultAsync(x => x.LinkTokenHash == hash, ct);
     public Task<PatientAccessGrant?> FindAccessByCodeHash(string hash, CancellationToken ct) => db.AccessGrants.SingleOrDefaultAsync(x => x.VisitCodeHash == hash, ct);
     public async Task<IReadOnlyList<PatientAccessGrant>> GetAccessGrants(Guid visitId, CancellationToken ct) => await db.AccessGrants.Where(x => x.VisitProcessId == visitId).ToListAsync(ct);
-    public async Task<IReadOnlyList<VisitProcess>> GetFacilityVisits(Guid facilityId, CancellationToken ct) => await db.Visits.Where(x => x.FacilityId == facilityId).OrderBy(x => x.ScheduledAt).ToListAsync(ct);
+    public async Task<IReadOnlyList<VisitProcess>> GetFacilityVisits(Guid facilityId, CancellationToken ct, string? clinicianId = null) =>
+        await db.Visits.Where(x => x.FacilityId == facilityId && (clinicianId == null || x.AssignedClinicianId == clinicianId))
+            .OrderBy(x => x.ScheduledAt).ToListAsync(ct);
+    public Task<ReceptionDetails?> GetReceptionDetails(Guid visitId, CancellationToken ct) =>
+        db.ReceptionDetails.SingleOrDefaultAsync(x => x.VisitProcessId == visitId, ct);
     public async Task<IReadOnlyList<VisitProcess>> GetPatientVisits(Guid patientIdentityId, CancellationToken ct) => await db.Visits.Where(x => x.PatientIdentityId == patientIdentityId).OrderBy(x => x.ScheduledAt).ToListAsync(ct);
     public async Task<IReadOnlyList<ReportVersion>> GetVersions(Guid visitId, CancellationToken ct) => await db.ReportVersions.Where(x => x.VisitProcessId == visitId).OrderBy(x => x.VersionNumber).ToListAsync(ct);
     public Task<ReportVersion?> GetVersion(Guid visitId, Guid versionId, CancellationToken ct) => db.ReportVersions.SingleOrDefaultAsync(x => x.VisitProcessId == visitId && x.Id == versionId, ct);

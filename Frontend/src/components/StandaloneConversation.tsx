@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import { CalendarDays, LoaderCircle } from 'lucide-react'
+import { LoaderCircle } from 'lucide-react'
 import { appointments } from '../data/mock'
 import { createInterview, submitAnswer } from '../lib/interview'
-import { appointmentDay, appointmentTime } from '../lib/format'
 import { agentApi, type AgentAccess, type AgentInterviewInfo } from '../lib/agent-api'
 import type { StandaloneRoute } from '../lib/routes'
 import { Conversation } from './Conversation'
 import { LiveConversation } from './LiveConversation'
 import { Summary } from './Summary'
+import { AppointmentCard } from './AppointmentCard'
+import { AccountEntry } from './AccountEntry'
+import { AccountWorkspace } from './AccountWorkspace'
 
 export function StandaloneConversation({ route }: { route: StandaloneRoute }) {
   const demoAppointment =
@@ -22,6 +24,8 @@ export function StandaloneConversation({ route }: { route: StandaloneRoute }) {
   const [info, setInfo] = useState<AgentInterviewInfo | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(!demoAppointment)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [accountActive, setAccountActive] = useState(false)
 
   useEffect(() => {
     if (demoAppointment) return
@@ -53,7 +57,15 @@ export function StandaloneConversation({ route }: { route: StandaloneRoute }) {
     return () => controller.abort()
   }, [route, demoAppointment])
 
-  const scheduledAt = demoAppointment?.scheduledAt ?? info?.visitDate
+  const visit =
+    demoAppointment ??
+    (info
+      ? {
+          ...info.visit,
+          scheduledAt: info.visit?.scheduledAt || info.visitDate,
+        }
+      : null)
+  if (accountActive) return <AccountWorkspace />
   return (
     <div className="standalone-shell">
       <header className="standalone-header">
@@ -61,47 +73,56 @@ export function StandaloneConversation({ route }: { route: StandaloneRoute }) {
           <span className="brand-ring" />
           Przed wizytą<span className="brand-dot">.</span>
         </span>
-        {scheduledAt && (
-          <span className="standalone-visit">
-            <CalendarDays size={15} />
-            {appointmentDay(scheduledAt)} · {appointmentTime(scheduledAt)}
-          </span>
+        {access && (
+          <button className="text-button" onClick={() => setAccountOpen(!accountOpen)}>
+            Konto pacjenta
+          </button>
         )}
       </header>
       <main className="standalone-content">
-        {loading ? (
-          <div className="invitation-state" role="status">
-            <LoaderCircle className="spin" size={24} />
-            <p>Otwieram rozmowę…</p>
-          </div>
-        ) : error ? (
-          <div className="invitation-state">
-            <h1>Nie można otworzyć rozmowy</h1>
-            <p role="alert">{error}</p>
-          </div>
-        ) : demoAppointment ? (
-          showSummary ? (
-            <Summary
-              interview={demoInterview}
-              appointment={demoAppointment}
-              authenticated={false}
-              onChange={setDemoInterview}
-              onBack={() => setShowSummary(false)}
-              notify={() => {}}
-            />
-          ) : (
-            <Conversation
-              interview={demoInterview}
-              onAnswer={(text, mode) =>
-                setDemoInterview((previous) => submitAnswer(previous, text, mode))
-              }
-              onSummary={() => setShowSummary(true)}
-              onReset={() => setDemoInterview(createInterview(demoAppointment))}
-            />
-          )
-        ) : (
-          access && <LiveConversation access={access} />
+        {accountOpen && access && (
+          <AccountEntry
+            access={access}
+            onDone={() => setAccountActive(true)}
+            onBack={() => setAccountOpen(false)}
+          />
         )}
+        <div className="standalone-interview" hidden={accountOpen}>
+          {!loading && !error && visit && <AppointmentCard visit={visit} />}
+          {loading ? (
+            <div className="invitation-state" role="status">
+              <LoaderCircle className="spin" size={24} />
+              <p>Otwieram rozmowę…</p>
+            </div>
+          ) : error ? (
+            <div className="invitation-state">
+              <h1>Nie można otworzyć rozmowy</h1>
+              <p role="alert">{error}</p>
+            </div>
+          ) : demoAppointment ? (
+            showSummary ? (
+              <Summary
+                interview={demoInterview}
+                appointment={demoAppointment}
+                authenticated={false}
+                onChange={setDemoInterview}
+                onBack={() => setShowSummary(false)}
+                notify={() => {}}
+              />
+            ) : (
+              <Conversation
+                interview={demoInterview}
+                onAnswer={(text, mode) =>
+                  setDemoInterview((previous) => submitAnswer(previous, text, mode))
+                }
+                onSummary={() => setShowSummary(true)}
+                onReset={() => setDemoInterview(createInterview(demoAppointment))}
+              />
+            )
+          ) : (
+            access && <LiveConversation access={access} initialStatus={info?.status} />
+          )}
+        </div>
       </main>
     </div>
   )

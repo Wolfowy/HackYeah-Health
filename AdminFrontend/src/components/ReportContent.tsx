@@ -155,7 +155,11 @@ export function ReportContent({ report, demo = true }: { report: ReportSnapshot;
           <h3>Obserwacje z wywiadu</h3>
           {report.observations.map((item) => (
             <div key={item.observationId} className="report-list-item">
-              <Tag>{item.source === 'ai_observation' ? 'Obserwacja AI' : 'Relacja pacjenta'}</Tag>
+              <Tag>
+                {['AiObservation', 'ai_observation'].includes(item.source)
+                  ? 'Obserwacja AI'
+                  : 'Relacja pacjenta'}
+              </Tag>
               <p>{item.text}</p>
             </div>
           ))}

@@ -1,14 +1,7 @@
-import {
-  ArrowRight,
-  CalendarDays,
-  Check,
-  ChevronRight,
-  FileText,
-  MessageCircle,
-} from 'lucide-react'
+import { Check, ChevronRight, FileText, MessageCircle } from 'lucide-react'
 import type { Appointment, Interview } from '../models'
-import { appointmentDay, appointmentTime } from '../lib/format'
 import { interviewQuestions } from '../data/mock'
+import { AppointmentCard } from './AppointmentCard'
 
 export function VisitContext({
   appointment,
@@ -25,36 +18,7 @@ export function VisitContext({
   const percent = Math.round((completed / interviewQuestions.length) * 100)
   return (
     <aside className="context-column" aria-label="Informacje o wywiadzie i wizycie">
-      <section className="visit-context card">
-        <div className="section-heading">
-          <h2>Twoja wizyta</h2>
-          <CalendarDays size={18} />
-        </div>
-        <div className="appointment-date">
-          <span className="date-icon">
-            <CalendarDays size={21} />
-          </span>
-          <div>
-            <strong>
-              {appointmentDay(appointment.scheduledAt)}
-              <span> · </span>
-              {appointmentTime(appointment.scheduledAt)}
-            </strong>
-            <p>{appointment.doctor.specialty}</p>
-          </div>
-        </div>
-        <div className="doctor-line">
-          <span className="doctor-avatar">{appointment.doctor.initials}</span>
-          <div>
-            <strong>{appointment.doctor.name}</strong>
-            <span>{appointment.facility.name}</span>
-          </div>
-        </div>
-        <button className="context-link" onClick={onAppointment}>
-          Szczegóły wizyty
-          <ArrowRight size={15} />
-        </button>
-      </section>
+      <AppointmentCard visit={appointment} compact onDetails={onAppointment} />
       <section className="interview-context card">
         <div className="section-heading">
           <h2>Twój wywiad</h2>

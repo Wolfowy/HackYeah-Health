@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Conversation, PartialOptions } from '@elevenlabs/client'
 import type { ConversationMode, Message, VoiceState } from '../models'
-import { agentApi, type AgentAccess, type AgentResult } from '../lib/agent-api'
+import {
+  agentApi,
+  resultCanBeReviewed,
+  type AgentAccess,
+  type AgentResult,
+  type AgentInterviewInfo,
+} from '../lib/agent-api'
+import { ConnectionTone } from '../lib/connection-tone'
+import { AgentSession } from '../lib/agent-session'
 
 export type AgentPhase =
   | 'idle'
@@ -13,33 +21,72 @@ export type AgentPhase =
   | 'completed'
   | 'error'
 
-export function useAgentConversation(access: AgentAccess) {
-  const [phase, setPhase] = useState<AgentPhase>('idle')
+export function useAgentConversation(
+  access: AgentAccess,
+  initialStatus: AgentInterviewInfo['status'] = 'pending',
+) {
+  const [phase, setPhase] = useState<AgentPhase>(
+    ['processing', 'completed'].includes(initialStatus) ? 'processing' : 'idle',
+  )
   const [voiceState, setVoiceState] = useState<VoiceState>('idle')
   const [mode, setMode] = useState<ConversationMode>('voice')
   const [messages, setMessages] = useState<Message[]>([])
   const [error, setError] = useState('')
   const [level, setLevel] = useState(0)
   const [result, setResult] = useState<AgentResult | null>(null)
+  const [lastSessionId, setLastSessionId] = useState<string | null>(null)
+  const [recovering, setRecovering] = useState(false)
+  const recoveryLock = useRef(false)
   const [muted, setMuted] = useState(false)
   const [sound, setSound] = useState(true)
+  const soundEnabled = useRef(sound)
+  const tone = useRef(new ConnectionTone())
+  const waitingForAgent = useRef(false)
   const sdk = useRef<Conversation | null>(null)
-  const sessionId = useRef<string | null>(null)
+  const closingSdk = useRef(new WeakMap<Conversation, Promise<void>>())
+  const session = useRef<AgentSession | null>(null)
   const generation = useRef(0)
-  const connecting = useRef(false)
+  const connecting = useRef<number | null>(null)
   const abort = useRef<AbortController | null>(null)
   const history = useRef(messages)
   history.current = messages
+
+  function closeSdk(instance: Conversation | null) {
+    if (!instance) return Promise.resolve()
+    let closing = closingSdk.current.get(instance)
+    if (!closing) {
+      closing = Promise.resolve()
+        .then(() => instance.endSession())
+        .catch((cause) => {
+          closingSdk.current.delete(instance)
+          throw cause
+        })
+      closingSdk.current.set(instance, closing)
+    }
+    return closing
+  }
 
   useEffect(
     () => () => {
       generation.current += 1
       abort.current?.abort()
-      void sdk.current?.endSession().catch(() => {})
-      if (sessionId.current) void agentApi.endSession(access, sessionId.current).catch(() => {})
+      waitingForAgent.current = false
+      tone.current.dispose()
+      void closeSdk(sdk.current).catch(() => {})
+      sdk.current = null
+      const activeSession = session.current
+      session.current = null
+      if (activeSession) void activeSession.end(!activeSession.conversationId).catch(() => {})
     },
     [access],
   )
+
+  useEffect(() => {
+    if (phase === 'connecting' && mode === 'voice' && sound && waitingForAgent.current)
+      tone.current.start()
+    else tone.current.stop()
+    return () => tone.current.stop()
+  }, [phase, mode, sound])
 
   useEffect(() => {
     if (phase !== 'connected' || mode !== 'voice') {
@@ -64,7 +111,8 @@ export function useAgentConversation(access: AgentAccess) {
         const value = await agentApi.getResult(access, controller.signal)
         if (controller.signal.aborted) return
         setResult(value)
-        if (value.status === 'completed') {
+        if (resultCanBeReviewed(value)) {
+          setError('')
           setPhase('completed')
           return
         }
@@ -73,6 +121,10 @@ export function useAgentConversation(access: AgentAccess) {
         setError(cause instanceof Error ? cause.message : 'Podsumowanie jest chwilowo niedostępne.')
       }
       if (Date.now() - startedAt < 60000) timeout = setTimeout(poll, 2000)
+      else
+        setError(
+          'Przetwarzanie trwa dłużej. Sprawdź ponownie podsumowanie lub spróbuj odzyskać wynik rozmowy.',
+        )
     }
     void poll()
     return () => {
@@ -83,21 +135,29 @@ export function useAgentConversation(access: AgentAccess) {
 
   async function start(nextMode = mode) {
     if (connecting.current) return
-    connecting.current = true
     const run = ++generation.current
+    connecting.current = run
+    waitingForAgent.current = false
+    tone.current.stop()
+    if (nextMode === 'voice' && soundEnabled.current) tone.current.prepare()
     abort.current?.abort()
     const controller = new AbortController()
     abort.current = controller
     setError('')
+    setPhase('connecting')
     try {
-      if (sessionId.current) {
-        await agentApi.endSession(access, sessionId.current, true)
-        sessionId.current = null
+      if (session.current) {
+        const previousSession = session.current
+        session.current = null
+        await previousSession.end(true)
       }
+      if (generation.current !== run) return
       if (sdk.current) {
-        await sdk.current.endSession()
+        const previousSdk = sdk.current
         sdk.current = null
+        await closeSdk(previousSdk)
       }
+      if (generation.current !== run) return
       setMode(nextMode)
       setMuted(false)
       if (nextMode === 'voice') {
@@ -110,17 +170,48 @@ export function useAgentConversation(access: AgentAccess) {
         permission.getTracks().forEach((track) => track.stop())
       }
       if (generation.current !== run) return
+      waitingForAgent.current = true
       setPhase('connecting')
       const credential = await agentApi.startSession(access, nextMode, controller.signal)
-      sessionId.current = credential.sessionId
       if (generation.current !== run) {
-        void agentApi.endSession(access, credential.sessionId).catch(() => {})
+        void new AgentSession(agentApi, access, credential.sessionId).end(true).catch(() => {})
         return
       }
+      const activeSession = new AgentSession(agentApi, access, credential.sessionId)
+      session.current = activeSession
+      setLastSessionId(credential.sessionId)
       if (credential.mode !== nextMode)
         throw new Error('Serwer zwrócił nieprawidłowy tryb rozmowy.')
       const { Conversation: ElevenConversation } = await import('@elevenlabs/client')
       if (generation.current !== run) return
+      function disconnected(connectionError = false, closeTransport = false) {
+        if (generation.current !== run) return
+        const finalRun = ++generation.current
+        waitingForAgent.current = false
+        tone.current.stop()
+        const instance = sdk.current
+        sdk.current = null
+        if (session.current === activeSession) session.current = null
+        setVoiceState('idle')
+        const hasConversation = !!activeSession.conversationId
+        setPhase(hasConversation ? 'ending' : 'error')
+        if (connectionError)
+          setError(
+            hasConversation
+              ? 'Połączenie zostało przerwane. Sprawdzam zapis rozmowy.'
+              : 'Nie udało się połączyć z asystentem. Spróbuj ponownie.',
+          )
+        if (closeTransport) void closeSdk(instance).catch(() => {})
+        void activeSession
+          .end(!hasConversation)
+          .catch(() => {
+            if (generation.current === finalRun)
+              setError('Nie udało się potwierdzić zakończenia. Oczekujemy na zapis rozmowy.')
+          })
+          .finally(() => {
+            if (generation.current === finalRun && hasConversation) setPhase('processing')
+          })
+      }
       const options: PartialOptions = {
         ...(credential.mode === 'voice'
           ? {
@@ -135,8 +226,18 @@ export function useAgentConversation(access: AgentAccess) {
             }),
         userId: credential.userId,
         dynamicVariables: credential.dynamicVariables,
+        onConnect: ({ conversationId }) => {
+          void activeSession.bind(conversationId).catch(() => {})
+          if (generation.current !== run) return
+          waitingForAgent.current = false
+          tone.current.stop()
+        },
         onMessage: (event) => {
           if (generation.current !== run || (event.role === 'user' && nextMode === 'text')) return
+          if (event.role === 'agent') {
+            waitingForAgent.current = false
+            tone.current.stop()
+          }
           const id = `${credential.sessionId}:${event.role}:${event.response_id ?? event.event_id}`
           setMessages((previous) => {
             const message: Message = {
@@ -155,49 +256,22 @@ export function useAgentConversation(access: AgentAccess) {
         onModeChange: (event) => {
           if (generation.current === run) setVoiceState(event.mode)
         },
-        onDisconnect: (details) => {
-          if (generation.current !== run) return
-          generation.current += 1
-          sdk.current = null
-          setVoiceState('idle')
-          void agentApi
-            .endSession(access, credential.sessionId)
-            .catch(() =>
-              setError('Nie udało się potwierdzić zakończenia. Oczekujemy na zapis rozmowy.'),
-            )
-          if (details.reason === 'error') {
-            setError('Połączenie zostało przerwane. Możesz rozpocząć kolejną sesję.')
-            setPhase('error')
-          } else {
-            setPhase('processing')
-          }
-        },
-        onError: () => {
-          if (generation.current === run) {
-            generation.current += 1
-            void sdk.current?.endSession().catch(() => {})
-            sdk.current = null
-            void agentApi.endSession(access, credential.sessionId).catch(() => {})
-            setError('Nie udało się połączyć z asystentem. Spróbuj ponownie.')
-            setPhase('error')
-            setVoiceState('idle')
-          }
-        },
+        onDisconnect: (details) => disconnected(details.reason === 'error'),
+        onError: () => disconnected(true, true),
       }
       const instance = await ElevenConversation.startSession(options)
       if (generation.current !== run) {
-        await instance.endSession()
+        void activeSession.bind(instance.getId()).catch(() => {})
+        await closeSdk(instance)
         return
       }
+      waitingForAgent.current = false
+      tone.current.stop()
       sdk.current = instance
-      await agentApi.bindConversation(
-        access,
-        credential.sessionId,
-        instance.getId(),
-        controller.signal,
-      )
+      if (nextMode === 'voice') instance.setVolume({ volume: soundEnabled.current ? 1 : 0 })
+      await activeSession.bind(instance.getId())
       if (generation.current !== run) {
-        await instance.endSession()
+        await closeSdk(instance)
         return
       }
       const previousSummary = credential.dynamicVariables.previous_conversation_summary
@@ -214,15 +288,18 @@ export function useAgentConversation(access: AgentAccess) {
             )
             .join('\n'),
         )
-      instance.setVolume({ volume: sound ? 1 : 0 })
       setVoiceState('listening')
       setPhase('connected')
     } catch (cause) {
       if (generation.current !== run) return
       generation.current += 1
-      await sdk.current?.endSession().catch(() => {})
+      waitingForAgent.current = false
+      tone.current.stop()
+      await closeSdk(sdk.current).catch(() => {})
       sdk.current = null
-      if (sessionId.current) void agentApi.endSession(access, sessionId.current).catch(() => {})
+      const activeSession = session.current
+      session.current = null
+      if (activeSession) void activeSession.end(true).catch(() => {})
       setError(
         cause instanceof DOMException && cause.name === 'NotAllowedError'
           ? 'Nie udzielono dostępu do mikrofonu. Możesz kontynuować tekstowo.'
@@ -233,12 +310,31 @@ export function useAgentConversation(access: AgentAccess) {
       setPhase('error')
       setVoiceState('idle')
     } finally {
-      connecting.current = false
+      if (connecting.current === run) connecting.current = null
     }
+  }
+
+  function cancelStart() {
+    if (phase !== 'requesting_microphone' && phase !== 'connecting') return
+    generation.current += 1
+    connecting.current = null
+    abort.current?.abort()
+    waitingForAgent.current = false
+    tone.current.stop()
+    const instance = sdk.current
+    sdk.current = null
+    void closeSdk(instance).catch(() => {})
+    const cancelledSession = session.current
+    session.current = null
+    if (cancelledSession) void cancelledSession.end(true).catch(() => {})
+    setPhase('idle')
+    setVoiceState('idle')
+    setError('')
   }
 
   async function changeMode(nextMode: ConversationMode) {
     if (nextMode === mode || connecting.current) return
+    tone.current.stop()
     if (phase === 'connected') await start(nextMode)
     else {
       setMode(nextMode)
@@ -264,11 +360,20 @@ export function useAgentConversation(access: AgentAccess) {
   }
   async function end() {
     if (!sdk.current) return
+    const instance = sdk.current
+    const activeSession = session.current
+    const run = generation.current
     setPhase('ending')
     try {
-      await sdk.current.endSession()
-      setPhase('processing')
+      // SDK normally fires onDisconnect; keep a fallback for a silent close.
+      await closeSdk(instance)
+      if (generation.current !== run) return
+      sdk.current = null
+      session.current = null
+      await activeSession?.end()
+      if (generation.current === run) setPhase('processing')
     } catch {
+      if (generation.current !== run) return
       setError('Nie udało się zakończyć połączenia. Spróbuj ponownie.')
       setPhase('error')
     }
@@ -279,17 +384,36 @@ export function useAgentConversation(access: AgentAccess) {
     setVoiceState(muted ? 'listening' : 'paused')
   }
   function toggleSound() {
-    sdk.current?.setVolume({ volume: sound ? 0 : 1 })
-    setSound(!sound)
+    const enabled = !soundEnabled.current
+    soundEnabled.current = enabled
+    if (enabled && mode === 'voice') tone.current.prepare()
+    else tone.current.stop()
+    if (mode === 'voice') sdk.current?.setVolume({ volume: enabled ? 1 : 0 })
+    setSound(enabled)
   }
   async function refreshResult() {
     try {
       const value = await agentApi.getResult(access)
       setResult(value)
       setError('')
-      if (value.status === 'completed') setPhase('completed')
+      setPhase(resultCanBeReviewed(value) ? 'completed' : 'processing')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Nie udało się pobrać podsumowania.')
+    }
+  }
+  async function recoverResult() {
+    if (!lastSessionId || recoveryLock.current) return
+    recoveryLock.current = true
+    setRecovering(true)
+    setError('')
+    try {
+      await agentApi.recoverSession(access, lastSessionId)
+      await refreshResult()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Nie udało się odzyskać wyniku.')
+    } finally {
+      recoveryLock.current = false
+      setRecovering(false)
     }
   }
   return {
@@ -303,11 +427,15 @@ export function useAgentConversation(access: AgentAccess) {
     muted,
     sound,
     start,
+    cancelStart,
     changeMode,
     sendMessage,
     end,
     toggleMute,
     toggleSound,
     refreshResult,
+    recoverResult,
+    lastSessionId,
+    recovering,
   }
 }

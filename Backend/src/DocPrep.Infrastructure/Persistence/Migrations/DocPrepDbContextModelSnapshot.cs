@@ -436,6 +436,7 @@ namespace DocPrep.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Revision")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("UpdatedAt")

@@ -42,6 +42,34 @@ test('API mapping preserves visits without reports and does not invent patient m
   assert.equal(visit.durationMinutes, null)
   assert.equal(visit.reportAvailable, false)
   assert.equal(visit.assignedClinicianId, 'clinician')
+  assert.equal(mapVisit({ ...dto, patientName: null }, 'facility').patient.name, 'Wizyta VIS-1')
+})
+
+test('clinician list and status preserve the API patient name, duration and end time', async () => {
+  const extended: AdminVisitDto = {
+    ...dto,
+    patientName: 'Jan Testowy',
+    durationMinutes: 45,
+    endsAt: '2026-10-04T10:45:00+02:00',
+  }
+  const service = createApiService(
+    new StaffHttp(async (url) => {
+      if (String(url).endsWith('/auth/login')) return json(tokens())
+      return String(url).endsWith('/status')
+        ? json(extended)
+        : json({ items: [extended], total: 1 })
+    }),
+  )
+  await service.signIn('doctor@example.com', 'secret')
+  const [listed] = await service.getAppointments()
+  const refreshed = await service.getAppointment(dto.visitId)
+  for (const visit of [listed, refreshed]) {
+    assert.equal(visit.patient.name, extended.patientName)
+    assert.equal(visit.durationMinutes, extended.durationMinutes)
+    assert.equal(visit.endsAt, extended.endsAt)
+    assert.equal(visit.patient.phone, '')
+    assert.equal(visit.report, null)
+  }
 })
 
 test('concurrent unauthorized requests share one rotated refresh and retry with new bearer', async () => {

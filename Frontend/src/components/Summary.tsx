@@ -2,13 +2,11 @@ import { useState } from 'react'
 import {
   Activity,
   ArrowLeft,
-  ArrowRight,
   Check,
   CheckCheck,
   CircleAlert,
   ClipboardList,
   Clock3,
-  Download,
   FileText,
   HeartPulse,
   MessageCircle,
@@ -26,7 +24,6 @@ import {
   missingFields,
   setSharingConsent,
 } from '../lib/interview'
-import { appointmentDay, appointmentTime, downloadJson } from '../lib/format'
 import type { Appointment, Interview, ReportField } from '../models'
 import { Modal } from './Modal'
 
@@ -58,9 +55,6 @@ export function Summary({
 }) {
   const [editing, setEditing] = useState<ReportField | null>(null)
   const [editText, setEditText] = useState('')
-  const [acknowledged, setAcknowledged] = useState(false)
-  const [sharing, setSharing] = useState(false)
-  const [consentChecked, setConsentChecked] = useState(false)
   const approved = isCurrentVersionApproved(interview)
   const version = interview.versions.at(-1)
   const missing = missingFields(interview.draft)
@@ -71,20 +65,8 @@ export function Summary({
     setEditText(interview.draft.sections[field].text)
   }
   function approve() {
-    onChange(approveReport(interview, acknowledged))
-    notify(
-      interview.consent.granted
-        ? 'Nowa wersja raportu została zatwierdzona i objęta aktywną zgodą.'
-        : 'Treść zatwierdzona. Teraz możesz osobno udostępnić raport.',
-    )
-    setAcknowledged(false)
-  }
-  const exportData = version && {
-    appointmentId: appointment.id,
-    facilityId: appointment.facility.id,
-    scheduledAt: appointment.scheduledAt,
-    doctor: appointment.doctor,
-    ...version,
+    onChange(setSharingConsent(approveReport(interview, missing.length > 0), true))
+    notify('Cały raport zatwierdzony i udostępniony lekarzowi w trybie demo.')
   }
 
   return (
@@ -101,7 +83,7 @@ export function Summary({
           <h2>{approved ? 'Treść zatwierdzona przez Ciebie' : 'Twoja historia, Twoje słowa.'}</h2>
           <p>
             {approved
-              ? `Wersja ${version?.version} · ${interview.consent.granted ? 'Raport udostępniony placówce w trybie demo.' : 'Raport czeka na osobną zgodę na udostępnienie.'}`
+              ? `Wersja ${version?.version} · ${interview.consent.granted ? 'Raport udostępniony placówce w trybie demo.' : 'Udostępnienie raportu zostało cofnięte.'}`
               : 'Sprawdź odpowiedzi. Każdą informację możesz zmienić lub usunąć.'}
           </p>
         </div>
@@ -166,7 +148,10 @@ export function Summary({
                 ? 'Raport gotowy. Ty wybierasz kolejny krok.'
                 : 'Spokojnie sprawdź, zanim zatwierdzisz.'}
             </h3>
-            <p>Zatwierdzenie treści i udostępnienie placówce to dwa osobne kroki.</p>
+            <p>
+              Zatwierdzasz cały raport, w tym widoczne braki, i przekazujesz go lekarzowi{' '}
+              {appointment.doctor.name}.
+            </p>
           </div>
         </div>
         {!approved && missing.length > 0 && (
@@ -181,25 +166,13 @@ export function Summary({
                 .join(', ')}
               .
             </span>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-              />
-              Rozumiem, że raport jest niepełny, i chcę zatwierdzić go w tej formie.
-            </label>
           </div>
         )}
         <div className="action-buttons">
           {!approved ? (
-            <button
-              className="button primary"
-              disabled={!hasContent || (missing.length > 0 && !acknowledged)}
-              onClick={approve}
-            >
+            <button className="button primary" disabled={!hasContent} onClick={approve}>
               <Check size={17} />
-              Zatwierdź treść raportu
+              Zatwierdź i udostępnij raport
             </button>
           ) : interview.consent.granted ? (
             <span className="pill success">
@@ -207,27 +180,12 @@ export function Summary({
               Udostępniony w demo
             </span>
           ) : (
-            <button
-              className="button primary"
-              onClick={() => {
-                setSharing(true)
-                setConsentChecked(false)
-              }}
-            >
-              Udostępnij placówce <ArrowRight size={17} />
+            <button className="button primary" onClick={approve} disabled={!hasContent}>
+              Zatwierdź i udostępnij raport
             </button>
           )}
           {version && (
             <>
-              <button
-                className="button secondary"
-                onClick={() =>
-                  downloadJson(exportData, `przed-wizyta-raport-v${version.version}.json`)
-                }
-              >
-                <Download size={16} />
-                Pobierz JSON
-              </button>
               <button className="button secondary" onClick={() => window.print()}>
                 <Printer size={16} />
                 Drukuj / PDF
@@ -261,7 +219,6 @@ export function Summary({
             onSubmit={(event) => {
               event.preventDefault()
               onChange(editReportField(interview, editing, editText))
-              setAcknowledged(false)
               setEditing(null)
               notify('Zmiana zapisana w wersji roboczej.')
             }}
@@ -291,54 +248,6 @@ export function Summary({
               </button>
             </div>
           </form>
-        </Modal>
-      )}
-      {sharing && (
-        <Modal title="Udostępnij raport placówce" onClose={() => setSharing(false)}>
-          <div className="sharing-recipient">
-            <span className="small-icon">
-              <ShieldCheck size={22} />
-            </span>
-            <div>
-              <strong>{appointment.facility.name}</strong>
-              <p>
-                {appointment.doctor.name} · {appointmentDay(appointment.scheduledAt)},{' '}
-                {appointmentTime(appointment.scheduledAt)}
-              </p>
-            </div>
-          </div>
-          <p className="modal-description">
-            Udostępnisz zatwierdzoną wersję {version?.version} tego wywiadu. Kolejne zatwierdzone
-            wersje będą objęte tą samą zgodą.
-          </p>
-          <label className="checkbox-row consent-checkbox">
-            <input
-              type="checkbox"
-              checked={consentChecked}
-              onChange={(event) => setConsentChecked(event.target.checked)}
-            />
-            Zgadzam się na udostępnienie tego wywiadu wskazanej placówce.
-          </label>
-          <p className="form-hint">
-            Zgodę możesz cofnąć. Nie wycofa to kopii wcześniej pobranych przez placówkę. W demo
-            udostępnienie jest symulowane.
-          </p>
-          <div className="modal-actions">
-            <button className="button secondary" onClick={() => setSharing(false)}>
-              Jeszcze nie
-            </button>
-            <button
-              className="button primary"
-              disabled={!consentChecked}
-              onClick={() => {
-                onChange(setSharingConsent(interview, true))
-                setSharing(false)
-                notify('Raport udostępniony placówce w trybie demo.')
-              }}
-            >
-              Potwierdź udostępnienie <ArrowRight size={16} />
-            </button>
-          </div>
         </Modal>
       )}
       {version && (

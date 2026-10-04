@@ -60,12 +60,15 @@ public sealed class PatientInterviewService(IDocPrepStore store, IInterviewQuest
         if (draft.Clarifications.Count > 0 && !command.ConfirmIncompleteReport)
             throw new ConflictError("incomplete_report.confirmation_required", "Explicit confirmation is required for an incomplete report.");
         var observations = await store.GetObservations(draft.Id, ct);
-        if (observations.Any(x => x.Decision == ObservationDecision.Pending))
+        if (!command.AcceptAllObservations && observations.Any(x => x.Decision == ObservationDecision.Pending))
             throw new ConflictError("observation.decision_required", "Every observation requires a patient decision.");
         var versions = await store.GetVersions(visitId, ct); var versionId = Guid.NewGuid(); var now = clock.UtcNow;
         var round = await store.GetOpenRound(visitId, ct);
         if (round?.Status == SupplementationRoundStatus.Open && round.Questions.Any(x => x.Answer is null))
             throw new ConflictError("supplementation.answers_missing", "All clinician questions require an answer.");
+        if (command.AcceptAllObservations)
+            foreach (var observation in observations.Where(x => x.Decision == ObservationDecision.Pending))
+                observation.Decide(ObservationDecision.Accepted, null, now);
         var snapshot = BuildSnapshot(versionId, versions.Count + 1, visit, draft, observations, round, command.ConfirmIncompleteReport, now);
         var json = JsonSerializer.Serialize(snapshot, JsonOptions);
         var version = new ReportVersion(versionId, visitId, snapshot.VersionNumber, snapshot.SchemaVersion, json, Hash(Encoding.UTF8.GetBytes(json)), command.ConfirmIncompleteReport, draft.Revision, now);
@@ -75,12 +78,18 @@ public sealed class PatientInterviewService(IDocPrepStore store, IInterviewQuest
                 store.Add(new ReportEvidence(versionId, observation.Id, evidence.SourceVisitId, evidence.SourceReportVersionId, evidence.SourceDate, evidence.SourceFragment));
         visit.RegisterApprovedVersion(versionId, now); if (round is not null) round.Close(now);
         store.Add(new AuditEvent(visit.FacilityId, visitId, "patient-session", $"report.approved:{versionId}", now)); await store.Save(ct);
-        try
-        {
-            var pdf = renderer.Render(snapshot); version.CompletePdf(pdf, Hash(pdf));
-            visit.PublishApprovedVersion(await store.GetActiveConsent(visitId, ct) is not null, now); await store.Save(ct);
-        }
+        byte[] pdf;
+        try { pdf = renderer.Render(snapshot); }
         catch { version.FailPdf(); await store.Save(ct); throw new ConflictError("report.generation_failed", "The content was approved, but PDF generation failed and can be retried without reapproval."); }
+        version.CompletePdf(pdf, Hash(pdf));
+        var consent = await store.GetActiveConsent(visitId, ct);
+        if (command.ShareWithFacility)
+        {
+            if (consent is null) store.Add(new SharingConsent(visitId, visit.FacilityId, "patient-session", now));
+            store.Add(new AuditEvent(visit.FacilityId, visitId, "patient-session", "consent.granted", now));
+        }
+        visit.PublishApprovedVersion(consent is not null || command.ShareWithFacility, now);
+        await store.Save(ct);
         return new(version.Id, version.VersionNumber, version.ApprovedAt, version.ConfirmedIncomplete);
     }
 
@@ -141,15 +150,21 @@ public sealed class PatientInterviewService(IDocPrepStore store, IInterviewQuest
         {
             var matches = history.SelectMany(x => x.Snapshot.Symptoms.Where(s => s.Name.Equals(symptom.Name, StringComparison.OrdinalIgnoreCase)).Select(s => (x.Visit, x.Version, Symptom: s))).ToList();
             var kind = matches.Count == 0 ? ObservationKind.New : matches.Any(x => x.Symptom.Severity != symptom.Severity) ? ObservationKind.Changed : matches.Count > 1 ? ObservationKind.Pattern : ObservationKind.Recurring;
-            var text = kind switch { ObservationKind.New => $"{symptom.Name} is newly reported.", ObservationKind.Changed => $"The reported severity of {symptom.Name} differs from an earlier interview.", ObservationKind.Pattern => $"{symptom.Name} has been reported in multiple interviews.", _ => $"{symptom.Name} has been reported again." };
+            var text = kind switch
+            {
+                ObservationKind.New => $"Nowo zgłoszony objaw: {symptom.Name}.",
+                ObservationKind.Changed => $"Zgłoszone nasilenie objawu „{symptom.Name}” różni się od wcześniejszego wywiadu.",
+                ObservationKind.Pattern => $"Objaw „{symptom.Name}” zgłoszono w kilku wywiadach.",
+                _ => $"Objaw „{symptom.Name}” zgłoszono ponownie."
+            };
             var observation = new ObservationProposal(draft.Id, symptom.Name, kind, text, clock.UtcNow);
-            foreach (var match in matches) observation.Evidence.Add(new(observation.Id, match.Visit.Id, match.Version.Id, match.Visit.ScheduledAt, $"{match.Symptom.Name}; severity {match.Symptom.Severity?.ToString() ?? "unknown"}"));
+            foreach (var match in matches) observation.Evidence.Add(new(observation.Id, match.Visit.Id, match.Version.Id, match.Visit.ScheduledAt, $"{match.Symptom.Name}; nasilenie {match.Symptom.Severity?.ToString() ?? "nieznane"}"));
             store.Add(observation);
         }
         var currentNames = draft.Symptoms.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var previous in history.SelectMany(x => x.Snapshot.Symptoms.Select(s => (x.Visit, x.Version, Symptom: s))).Where(x => !currentNames.Contains(x.Symptom.Name)).GroupBy(x => x.Symptom.Name, StringComparer.OrdinalIgnoreCase))
         {
-            var observation = new ObservationProposal(draft.Id, previous.Key, ObservationKind.InsufficientData, $"{previous.Key} was not mentioned in this interview; this does not mean it has resolved.", clock.UtcNow);
+            var observation = new ObservationProposal(draft.Id, previous.Key, ObservationKind.InsufficientData, $"Objawu „{previous.Key}” nie wymieniono w tym wywiadzie; nie oznacza to, że ustąpił.", clock.UtcNow);
             foreach (var match in previous) observation.Evidence.Add(new(observation.Id, match.Visit.Id, match.Version.Id, match.Visit.ScheduledAt, match.Symptom.Name));
             store.Add(observation);
         }

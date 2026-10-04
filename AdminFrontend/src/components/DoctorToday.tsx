@@ -64,6 +64,7 @@ export function DoctorToday({
               <div className="queue-time">
                 <span>{String(index + 1).padStart(2, '0')}</span>
                 <time>{formatTime(visit.scheduledAt)}</time>
+                {visit.endsAt && <small>do {formatTime(visit.endsAt)}</small>}
                 {visit.durationMinutes && <small>{visit.durationMinutes} min</small>}
               </div>
               <div className="queue-patient">

@@ -64,28 +64,32 @@ public sealed class IntegrationService(IDocPrepStore store, IPatientDataProtecto
         return result;
     }
 
-    public async Task<IReadOnlyList<AdminVisitView>> Dashboard(Guid facilityId, CancellationToken ct)
+    public async Task<IReadOnlyList<AdminVisitView>> Dashboard(Guid facilityId, CancellationToken ct, string? clinicianId = null)
     {
-        var visits = await store.GetFacilityVisits(facilityId, ct); var result = new List<AdminVisitView>();
+        var visits = await store.GetFacilityVisits(facilityId, ct, clinicianId); var result = new List<AdminVisitView>();
         foreach (var visit in visits)
         {
             visit.Expire(clock.UtcNow);
             var delivery = await store.GetLatestDelivery(visit.Id, ct); var round = await store.GetOpenRound(visit.Id, ct);
             var interview = await store.GetAgentInterviewByVisit(visit.Id, ct);
             var details = interview is null ? null : Details(visit, interview);
+            var reception = await store.GetReceptionDetails(visit.Id, ct);
+            var patientName = reception is null ? null :
+                JsonSerializer.Deserialize<ReceptionPatient>(protector.Unprotect(reception.EncryptedPatient))?.Name;
             result.Add(new(visit.Id, visit.ExternalVisitId, visit.ScheduledAt, visit.Status,
                 delivery?.Status.ToString() ?? "NotSent", round is not null, details, interview?.Id,
-                interview?.Status.ToString(), interview?.ExtractionStatus.ToString(), interview?.ImportStatus.ToString()));
+                interview?.Status.ToString(), interview?.ExtractionStatus.ToString(), interview?.ImportStatus.ToString(),
+                patientName, visit.DurationMinutes, visit.ScheduledAt.AddMinutes(visit.DurationMinutes)));
         }
         await store.Save(ct);
         return result;
     }
 
     public async Task<PagedResult<AdminVisitView>> Search(Guid facilityId, DateTimeOffset? from, DateTimeOffset? to,
-        VisitStatus? status, int page, int pageSize, CancellationToken ct)
+        VisitStatus? status, int page, int pageSize, CancellationToken ct, string? clinicianId = null)
     {
         page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
-        var values = (await Dashboard(facilityId, ct)).Where(x => (from is null || x.ScheduledAt >= from) &&
+        var values = (await Dashboard(facilityId, ct, clinicianId)).Where(x => (from is null || x.ScheduledAt >= from) &&
             (to is null || x.ScheduledAt <= to) && (status is null || x.Status == status)).ToList();
         return new(values.Skip((page - 1) * pageSize).Take(pageSize).ToList(), page, pageSize, values.Count);
     }

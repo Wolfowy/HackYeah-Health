@@ -109,6 +109,9 @@ public sealed class InterviewExtractionService(IDocPrepStore store, IClock clock
         if (draft is null) return false;
         if (interview.ImportedDraftRevision is not null && draft.Revision != interview.ImportedDraftRevision)
             return false; // późny webhook nie może skasować ręcznej poprawki pacjenta
+        if (interview.ImportedDraftRevision is null && (draft.UpdatedAt > interview.CreatedAt ||
+            (!interview.InterviewType.Equals("supplementation", StringComparison.OrdinalIgnoreCase) && draft.Revision > 0)))
+            return false; // również pierwszy import chroni ręczne zmiany wykonane po utworzeniu wywiadu
         if (interview.InterviewType.Equals("supplementation", StringComparison.OrdinalIgnoreCase))
             data = MergeWithDraft(draft, data);
 

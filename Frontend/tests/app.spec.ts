@@ -9,10 +9,10 @@ async function navigate(page: Page, name: string) {
     .click()
 }
 
-test('gość przechodzi wywiad, poprawia raport, zatwierdza i osobno udostępnia', async ({
+test('gość przechodzi wywiad, poprawia raport, zatwierdza i udostępnia jednym kliknięciem', async ({
   page,
 }) => {
-  await page.goto('/')
+  await page.goto('/demo')
   await expect(page.getByRole('heading', { name: 'Porozmawiajmy o Twoim zdrowiu' })).toBeVisible()
   await page.getByRole('button', { name: 'Czat', exact: true }).click()
   const replies = [
@@ -30,24 +30,20 @@ test('gość przechodzi wywiad, poprawia raport, zatwierdza i osobno udostępnia
   await page.getByLabel('Treść informacji').fill('Ból głowy od czterech dni.')
   await page.getByRole('button', { name: 'Zapisz zmiany' }).click()
   await expect(page.getByText('Ból głowy od czterech dni.', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Zatwierdź treść raportu' }).click()
+  await page.getByRole('button', { name: 'Zatwierdź i udostępnij raport' }).click()
   await expect(page.getByRole('heading', { name: 'Treść zatwierdzona przez Ciebie' })).toBeVisible()
-  await page.getByRole('button', { name: 'Udostępnij placówce' }).click()
-  await expect(page.getByRole('button', { name: 'Potwierdź udostępnienie' })).toBeDisabled()
-  await page.getByRole('checkbox', { name: 'Zgadzam się na udostępnienie' }).check()
-  await page.getByRole('button', { name: 'Potwierdź udostępnienie' }).click()
   await expect(page.getByText('Udostępniony w demo', { exact: true })).toBeVisible()
-  const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Pobierz JSON' }).click()
-  expect((await download).suggestedFilename()).toBe('przed-wizyta-raport-v1.json')
+  await expect(page.getByRole('button', { name: 'Pobierz JSON' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Udostępnij placówce' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Drukuj / PDF' })).toBeVisible()
   await page.getByRole('button', { name: 'Cofnij zgodę na udostępnienie' }).click()
-  await expect(page.getByRole('button', { name: 'Udostępnij placówce' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Zatwierdź i udostępnij raport' })).toBeVisible()
 })
 
 test('demo głosu reaguje na start i pauzę, a przełączenie do tekstu zachowuje odpowiedź', async ({
   page,
 }) => {
-  await page.goto('/')
+  await page.goto('/demo')
   await page.getByRole('button', { name: 'Rozpocznij rozmowę demonstracyjną' }).click()
   await expect(page.locator('.orb-scene')).toHaveAttribute('data-state', 'speaking')
   await expect(page.locator('.orb-scene')).toHaveAttribute('data-state', 'listening')
@@ -72,7 +68,7 @@ test('demo głosu reaguje na start i pauzę, a przełączenie do tekstu zachowuj
 test('konto demo udostępnia listę wizyt, izoluje raporty i czyści dane po wylogowaniu', async ({
   page,
 }) => {
-  await page.goto('/')
+  await page.goto('/demo')
   await page.getByRole('button', { name: 'Czat', exact: true }).click()
   await page.getByRole('button', { name: 'Od kilku dni boli mnie głowa.', exact: true }).click()
   await page.getByRole('button', { name: 'Zaloguj się', exact: true }).click()
@@ -100,21 +96,23 @@ test('konto demo udostępnia listę wizyt, izoluje raporty i czyści dane po wyl
   await expect(page.getByText('Od kilku dni boli mnie głowa.', { exact: true })).toHaveCount(0)
 })
 
-test('niepełny raport wymaga potwierdzenia', async ({ page }) => {
-  await page.goto('/')
+test('niepełny raport pokazuje braki i jest zatwierdzany jednym kliknięciem', async ({ page }) => {
+  await page.goto('/demo')
   await page.getByRole('button', { name: 'Czat', exact: true }).click()
   await page.getByRole('button', { name: 'Od kilku dni boli mnie głowa.', exact: true }).click()
   await navigate(page, 'Podsumowanie')
-  await expect(page.getByRole('button', { name: 'Zatwierdź treść raportu' })).toBeDisabled()
-  await page.getByRole('checkbox', { name: 'Rozumiem, że raport jest niepełny' }).check()
-  await page.getByRole('button', { name: 'Zatwierdź treść raportu' }).click()
-  await expect(page.getByRole('button', { name: 'Udostępnij placówce' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Zatwierdź i udostępnij raport' })).toBeEnabled()
+  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByText(/Pozostało do wyjaśnienia/)).toBeVisible()
+  await page.getByRole('button', { name: 'Zatwierdź i udostępnij raport' }).click()
+  await expect(page.getByText('Udostępniony w demo', { exact: true })).toBeVisible()
 })
 
-test('link demo otwiera samą rozmowę, bez bocznego menu i dodatkowych kart', async ({ page }) => {
+test('link demo otwiera rozmowę z kartą wizyty, bez bocznego menu', async ({ page }) => {
   await page.goto('/i/demo-appointment-1')
   await expect(page.getByRole('navigation')).toHaveCount(0)
   await expect(page.locator('.sidebar, .visit-context')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Informacje o wizycie' })).toBeVisible()
   await expect(page.locator('.orb-waves')).toBeVisible()
   await expect(page.locator('.orb-waves path')).toHaveCount(5)
   await expect(page.locator('.orb-waves')).toHaveAttribute('fill', 'none')
@@ -179,6 +177,10 @@ test('prawdziwy link wymienia token i pokazuje błąd backendu bez żądania mik
   await page.goto('/i/test-invitation-token')
   await expect(page).toHaveURL(/\/rozmowa$/)
   await expect(page.getByRole('navigation')).toHaveCount(0)
+  const card = page.getByRole('region', { name: 'Informacje o wizycie' })
+  await expect(card.getByText('Nie podano lekarza', { exact: true })).toBeVisible()
+  await expect(card.getByText('Nie podano placówki', { exact: true })).toBeVisible()
+  await expect(card.locator('time')).toContainText('11:00')
   await page.getByRole('button', { name: 'Czat', exact: true }).click()
   await page.getByRole('button', { name: 'Rozpocznij czat', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Rozmowa jest chwilowo niedostępna')
@@ -188,7 +190,7 @@ test('prawdziwy link wymienia token i pokazuje błąd backendu bez żądania mik
 })
 
 test('interfejs mieści się w szerokości ekranu', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/demo')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
