@@ -2039,6 +2039,7 @@ i.supplement,
 }
 .doctor-queue-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 28px;
   padding: 27px 0;
@@ -2069,7 +2070,7 @@ i.supplement,
 }
 .queue-patient {
   flex: 1;
-  min-width: 0;
+  min-width: min(180px, 100%);
 }
 .queue-patient h3 {
   margin: 0 0 6px;
